@@ -1,11 +1,9 @@
 -- ==============================================================================
 -- SCOUT HUB (كشافة هب) — Production Database Schema & RLS Policies
--- Comprehensive Migration for Scout Management, Friday Attendance, and Teams
+-- Migration 001: base schema. Run 002_production_hardening.sql right after it.
 -- ==============================================================================
 
--- Enable UUID extension
-CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- gen_random_uuid() is built into PostgreSQL 13+ (no extensions required).
 
 -- ------------------------------------------------------------------------------
 -- 1. STAGES (المراحل الكشفية)
@@ -63,7 +61,7 @@ CREATE TABLE IF NOT EXISTS public.user_roles (
 CREATE INDEX IF NOT EXISTS idx_user_roles_user ON public.user_roles(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_roles_role ON public.user_roles(role);
 
--- Helper security functions
+-- Helper security functions (re-defined with a pinned search_path in migration 002)
 CREATE OR REPLACE FUNCTION public.is_admin(check_user_id UUID)
 RETURNS BOOLEAN AS $$
 BEGIN
@@ -256,7 +254,7 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON public.audit_logs(action);
 
 -- ------------------------------------------------------------------------------
--- 13. ROW LEVEL SECURITY (RLS) POLICIES
+-- 13. ROW LEVEL SECURITY (RLS) POLICIES (several are tightened in migration 002)
 -- ------------------------------------------------------------------------------
 ALTER TABLE public.stages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;

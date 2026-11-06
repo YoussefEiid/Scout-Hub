@@ -1,26 +1,66 @@
 @import "tailwindcss";
 
+@theme {
+  --color-forest: #173C32;
+  --color-forest-hover: #1e4a3e;
+  --color-emerald: #23836B;
+  --color-emerald-hover: #2ba083;
+  --color-emerald-dark: #195e4d;
+  --color-sand: #F5EBD8;
+  --color-sand-light: #FAF5EC;
+  --color-cream: #FCF9F2;
+  --color-orange: #E89B50;
+  --color-orange-hover: #d6893e;
+  --color-charcoal: #24342E;
+
+  --font-cairo: var(--font-cairo), Cairo, Tajawal, system-ui, sans-serif;
+}
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --background: #FCF9F2;
+  --foreground: #24342E;
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-cairo);
+  -webkit-tap-highlight-color: transparent;
+  direction: rtl;
+  text-align: right;
+  overflow-x: hidden;
+}
+
+/* Print-friendly styles for Physical Scout ID Cards */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  .scout-print-card {
+    page-break-inside: avoid;
+    border: 2px solid #173C32 !important;
+    box-shadow: none !important;
+  }
+}
+
+/* Glassmorphism and Mobile Touch Utilities */
+.scout-glass {
+  background: rgba(252, 249, 242, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.scout-card-shadow {
+  box-shadow: 0 4px 20px -2px rgba(23, 60, 50, 0.08), 0 2px 6px -1px rgba(23, 60, 50, 0.04);
+}
+
+.scout-badge-glow {
+  box-shadow: 0 0 15px rgba(232, 155, 80, 0.35);
 }

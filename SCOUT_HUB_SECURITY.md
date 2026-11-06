@@ -1,78 +1,66 @@
 # SCOUT HUB — Security Architecture, RBAC & Privacy Model
-**معمارية الأمان والصلاحيات وحماية خصوصية الكشافة**
+**معمارية الأمان والصلاحيات وحماية خصوصية الكشافة — الإصدار المعتمد للإنتاج**
 
 ---
 
-## 1. Threat Model & Privacy Principles for Scout Minors
-Scout organizations frequently handle rosters containing youth and minors. The security architecture adheres to strict privacy-by-design standards:
-1. **Zero Raw Identification in QR**: The QR code encodes only a random high-entropy UUID (`qr_credentials.id`). It does **not** contain the scout's name, phone number, email, or internal database primary key.
-2. **Contact Information Confidentiality**: Ordinary members cannot query teammate phone numbers, emails, addresses, or private commitment preferences. Teammate views are strictly restricted to: full name, scout stage, avatar, and assigned patrol role.
-3. **Server-Authoritative Clock**: Scanned attendance times are determined solely by PostgreSQL server clock (`NOW()`), preventing clock-skew tampering on client devices.
-4. **Credential Rotation & Instant Invalidation**: If an ID card is lost, stolen, or photographed by an unauthorized third party, the leader can revoke the credential in one click. Old tokens immediately fail validation.
+## 1. نموذج الأمان ومبدأ انعدام الثقة (Zero-Trust Security Model)
+
+تتعامل المنظمة الكشفية مع بيانات ناشئين وقُصّر، ولذا تخضع المنصة لمعايير صارمة للخصوصية والأمان الميداني:
+
+1. **انعدام الثقة في طلبات العميل (Zero-Trust Client Requests)**:
+   - تم استئصال أي اعتماد على ترويسات HTTP مثل `x-scout-auth-mode`.
+   - لا تملك واجهة العميل أو المتصفح أي سلطة لتحديد وضع المصادقة أو منح الأدوار.
+   - التحقق من الجلسة يتم على الخادم حصرًا عبر `auth.getUser()` ومقارنتها مباشرة مع جدول `user_roles` في PostgreSQL.
+
+2. **الفشل الآمن (Fail-Closed Backend)**:
+   - في بيئة الإنتاج (`NODE_ENV=production`)، يتعطل وضع المحاكاة التجريبي (`demo mode`) جبريًا.
+   - في حال غياب بيانات الاتصال بـ Supabase، تفشل جميع العمليات الحساسة فورًا برسالة خطأ محددة (`CONFIG_MISSING`) ودون السماح بأي تسريب أو محاكاة صامتة.
+
+3. **خصوصية رمز الاستجابة السريعة (QR Bearer Token Privacy)**:
+   - يتضمن رمز QR معرف UUID عشوائي فائق التعقيد فقط.
+   - لا يحتوي الرمز على اسم الكشاف، رقم هاتفه، بريده، أو رقمه القومي.
+   - دالة التحقق `verify_qr_credential` تعيد فقط بيانات التعريف الكشفية دون إرجاع الرمز السري ذاته.
+   - لا يتم تسجيل الرمز السري إطلاقًا داخل سجلات التدقيق `audit_logs`.
+
+4. **توقيت خادم مركزي غير قابل للتلاعب (Server-Authoritative Cairo Clock)**:
+   - توقيت تسجيل الحضور وتحديد حالة التأخير (`on_time` مقابل `late`) يُحسم حصريًا عبر توقيت خادم PostgreSQL بتوقيت القاهرة (`Africa/Cairo`) ولا يمكن التلاعب به بتغيير ساعة هاتف القائد.
+
+5. **حركات التسجيل التعويضية (Compensating Registration Transactions)**:
+   - يتم إنشاء حساب الدخول عبر `createAdminClient()`.
+   - يتم استدعاء دالة `register_member_profile()` في معاملة موحدة.
+   - في حال حدوث أي خطأ في قاعدة البيانات، يُحذف حساب الدخول فورًا بحركة تعويضية تمنع تراكم حسابات يتيمة (Orphaned Auth Records).
 
 ---
 
-## 2. Role-Based Access Control (RBAC) Matrix
+## 2. مصفوفة الصلاحيات الميدانية (RBAC Matrix)
 
-| Permission / Capability | Super Admin | Admin | Attendance Leader | Member | Public/Guest |
-|---|:---:|:---:|:---:|:---:|:---:|
-| **Register new account** | - | - | - | - | Yes |
-| **View landing page** | Yes | Yes | Yes | Yes | Yes |
-| **View own profile & Scout ID Card** | Yes | Yes | Yes | Yes | No |
-| **Submit Friday RSVP Response** | Yes | Yes | Yes | Yes | No |
-| **View published team roster** | Yes | Yes | Yes | Yes | No |
-| **View unpublished team drafts** | Yes | Yes | No | No | No |
-| **Scan QR / Record Friday attendance** | Yes | Yes | Yes | No | No |
-| **Manual attendance entry / correction** | Yes | Yes | With Reason | No | No |
-| **Generate & publish teams** | Yes | Yes | No | No | No |
-| **Create Friday meetings** | Yes | Yes | No | No | No |
-| **Export member CSV / Excel reports** | Yes | Yes | No | No | No |
-| **Assign or change user roles** | Yes | No | No | No | No |
-| **Access audit logs & system settings** | Yes | Read-only | No | No | No |
-
----
-
-## 3. PostgreSQL Row Level Security (RLS) Strategy
-
-All tables have RLS enabled (`ALTER TABLE ... ENABLE ROW LEVEL SECURITY;`).
-
-### 3.1 Profiles Table
-- **SELECT**:
-  - `auth.uid() = id`: Member can read their full personal profile.
-  - Leaders/Admins (`user_roles.role IN ('super_admin', 'admin', 'attendance_leader')`): Can read member records.
-  - Other Members: Cannot access private contact columns (`phone`, `initial_commitment`).
-- **INSERT**:
-  - `auth.uid() = id`: Authenticated user can create their initial profile during onboarding.
-- **UPDATE**:
-  - `auth.uid() = id`: Member can update non-privileged fields (avatar, display name).
-  - Admin: Can update stage, active status, etc.
-
-### 3.2 QR Credentials
-- **SELECT**:
-  - Member can read only their own active credential: `auth.uid() = member_id AND is_active = TRUE`.
-  - Authorized scanner (`attendance_leader`, `admin`): Can look up a credential by ID to verify attendance.
-- **INSERT / UPDATE**:
-  - Only `admin` / `super_admin` can revoke or issue new tokens.
-
-### 3.3 Teams & Team Memberships
-- **SELECT**:
-  - If distribution is `published`: Authenticated members can view team names and member names in their team.
-  - If distribution is `draft`: Visible **only** to `admin` and `super_admin`. Regular members return 0 rows.
-- **INSERT / UPDATE / DELETE**:
-  - Only `admin` and `super_admin`.
-
-### 3.4 Attendance Records
-- **SELECT**:
-  - Member can view only their own attendance history (`auth.uid() = member_id`).
-  - Leaders/Admins can view all records for their group.
-- **INSERT**:
-  - Only users with role `attendance_leader`, `admin`, or `super_admin`.
+| العملية / الصلاحية | Super Admin | Admin | Attendance Leader | Member | Public / زائر |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **تسجيل حساب جديد** | — | — | — | — | متاح |
+| **عرض بطاقة الهوية الكشفية الرقمية الخاصة** | نعم | نعم | نعم | نعم | لا |
+| **تجديد رمز بطاقة الهوية الخاصة** | نعم | نعم | نعم | نعم | لا |
+| **تسجيل الرد على اجتماع الجمعة (RSVP)** | نعم | نعم | نعم | نعم (لنفسه فقط) | لا |
+| **عرض الفريق المنشور الخاص** | نعم | نعم | نعم | نعم | لا |
+| **مسح رمز QR وتسجيل حضور الجمعة** | نعم | نعم | نعم | لا | لا |
+| **تسجيل حضور يدوي (مع ذكر السبب)** | نعم | نعم | نعم (مُسجل في التدقيق) | لا | لا |
+| **توليد مسودات الفرق ومراجعتها** | نعم | نعم | لا | لا | لا |
+| **نشر الفرق رسميًا (مع قفل التزامن)** | نعم | نعم | لا | لا | لا |
+| **تصدير كشوفات الحضور بصيغة CSV** | نعم | نعم | لا | لا | لا |
+| **تجديد رموز QR لكشافين آخرين** | نعم | نعم | لا | لا | لا |
+| **تعيين أو تغيير أدوار المستخدمين** | نعم | لا | لا | لا | لا |
+| **الاطلاع على سجلات التدقيق (Audit Logs)** | نعم | لا | لا | لا | لا |
 
 ---
 
-## 4. Admin Bootstrapping
-To prevent unauthorized privilege escalation:
-- The first administrator is bootstrapped via:
-  1. A secure migration seed script using a pre-configured admin email, OR
-  2. A dedicated server-side environment variable `INITIAL_SUPER_ADMIN_EMAIL` that elevates the first registered account matching that email during initial registration.
-- No client-side request can mutate `user_roles` without verifying admin authorization on the server.
+## 3. حماية دوال PostgreSQL وسياسات RLS
+
+1. **تثبيت مسار البحث (Pinned search_path)**:
+   - جميع دوال `SECURITY DEFINER` المعتمدة مثبتة بـ `SET search_path = public` لمنع هجمات انتحال الكائنات (Search Path Hijacking).
+
+2. **عزل سياسات RLS**:
+   - لا يمكن للمستخدم العادي إدراج سجلات في `profiles` أو `user_roles` مباشرة؛ الإدراج يتم حصرًا عبر الدالة المحمية بمفتاح الخدمة `register_member_profile()`.
+   - جدول `team_distributions` لا يُظهر المسودات `status = 'draft'` إلا لحسابات `admin` و `super_admin`.
+
+3. **ضمان الاتساق الذري في نشر الفرق**:
+   - تستخدم دالة `publish_team_distribution()` القفل الاستشاري `pg_advisory_xact_lock(hashtext('team_distribution_publish'))` لمنع سباق النشر المزدوج.
+   - القيد الجزئي الفريد `uq_one_current_published` يمنع بنيويًا وجود نسختين منشورتين في ذات اللحظة.

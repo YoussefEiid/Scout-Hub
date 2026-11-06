@@ -1,77 +1,95 @@
 # SCOUT HUB — Production Deployment & Operations Guide
-**دليل النشر والتشغيل لمنصة كشافة هب**
+**دليل النشر والتشغيل الميداني المعتمد لمنصة كشافة هب**
 
 ---
 
-## 1. Hosting Architecture
-- **Web & API Tier**: Vercel (Next.js App Router, Server Actions, Edge/Node Runtime)
-- **Database & Auth Tier**: Supabase (PostgreSQL 15+, Supabase Auth, Row Level Security)
-- **Static Assets & PWA**: Next.js optimized public bundle with Service Worker caching
+## 1. نظرة عامة على البنية التحتية
+- **Web & API Tier**: Next.js 16 App Router (Node.js runtime, Server Actions, Turbopack, PWA).
+- **Edge Routing & Proxy**: Next.js 16 Proxy (`src/proxy.ts`) with zero-trust session validation.
+- **Database & Auth Tier**: Supabase (PostgreSQL 15+, Supabase Auth, Row Level Security, SECURITY DEFINER RPC functions with locked `search_path = public`).
+- **PWA Tier**: Installable mobile manifest (`/manifest.webmanifest`), offline fallback UI, RTL Arabic mobile-first design.
 
 ---
 
-## 2. Environment Variables Specification
-Create a `.env.local` for development and configure the same secrets in Vercel Project Settings:
+## 2. متغيرات البيئة للإنتاج (.env.production / Vercel Secrets)
 
-```ini
-# Supabase Public Configuration (Client-side accessible)
-NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+| المتغير | الحساسية | الوصف | القيمة النموذجية |
+| :--- | :--- | :--- | :--- |
+| `NEXT_PUBLIC_SUPABASE_URL` | عام | رابط مشروع Supabase | `https://xxxx.supabase.co` |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | عام | مفتاح Anon العام للعميل والمصادقة المبدئية | `eyJhbGciOi...` |
+| `SUPABASE_SERVICE_ROLE_KEY` | **سري للغاية** | مفتاح خادم الخدمة فقط لإنشاء المستخدمين وحركات التعويض | `eyJhbGciOi...` |
+| `SCOUT_DEMO_MODE` | عام | وضع العرض التجريبي (معطل جبريًا في الإنتاج `NODE_ENV=production`) | `false` |
+| `NEXT_PUBLIC_APP_URL` | عام | النطاق الرسمي للتطبيق | `https://scouthub.app` |
+| `DEFAULT_TIMEZONE` | عام | المنطقة الزمنية الرسمية لجلسات الجمعة | `Africa/Cairo` |
 
-# Supabase Service Role (Server-side ONLY - NEVER expose to browser)
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+> [!CAUTION]
+> **مفتاح الخدمة (SUPABASE_SERVICE_ROLE_KEY)**: لا يتم استدعاؤه مطلقًا في واجهات العميل أو متصفح الكشاف. يتم عزله حصريًا داخل `src/lib/supabase/admin.ts` لأداء العمليات الإدارية الحرجة وحركات التعويض (Compensating Transactions) أثناء التسجيل.
 
-# Initial Admin Bootstrap (Optional auto-elevation on first signup)
-INITIAL_SUPER_ADMIN_EMAIL=leader@scouthub.org
+---
 
-# Application Public URL
-NEXT_PUBLIC_APP_URL=https://scouthub.vercel.app
+## 3. تطبيق ترحيلات قاعدة البيانات (Database Migrations)
 
-# Timezone Default
-DEFAULT_TIMEZONE=Africa/Cairo
+يجب تطبيق ملفات الترحيل بالترتيب التالي على مشروع Supabase:
+
+1. **`supabase/migrations/001_initial_schema.sql`**:
+   - ينشئ الجداول الـ 15 الأساسية، القيود الفريدة، والفهارس.
+   - يعتمد دالة `gen_random_uuid()` القياسية لنواة PostgreSQL.
+
+2. **`supabase/migrations/002_production_hardening.sql`**:
+   - تثبيت `search_path = public` على كافة دوال `SECURITY DEFINER`.
+   - قفل النشر التنافسي للفرق عبر `pg_advisory_xact_lock`.
+   - القيد الفريد الجزئي `uq_one_current_published` لضمان نسخة واحدة منشورة فقط في أي لحظة.
+   - تسجيل الحضور اللحظي بتوقيت خادم القاهرة ومنع التكرار نهائيًا `(session_id, member_id)`.
+   - حماية رموز QR وحجبها عن واجهات الاستعلام وسجلات التدقيق `audit_logs`.
+
+---
+
+## 4. تهيئة الحساب الإداري الأول (Super Admin Bootstrap)
+
+بعد تطبيق الترحيلات:
+1. قم بإنشاء حسابك عبر صفحة التسجيل `/register`.
+2. ادخل إلى **SQL Editor** في لوحة تحكم Supabase وقم بترقية الحساب:
+   ```sql
+   INSERT INTO public.user_roles (user_id, role)
+   SELECT id, 'super_admin'
+   FROM public.profiles
+   WHERE member_number = 'SCT-2026-0001'
+   ON CONFLICT (user_id, role) DO NOTHING;
+   ```
+3. بمجرد الترقية، يصبح بإمكان السوبر أدمن تعيين قادة الحضور وتوزيع الفرق وإدارتها من واجهة `/admin`.
+
+---
+
+## 5. تشغيل فحوصات التكامل والجاهزية للإنتاج
+
+قبل فتح المنصة للأعضاء، قم بتشغيل حزم الاختبارات الآلية:
+
+```bash
+# 1. اختبار دوال وسياسات قاعدة البيانات في بيئة معزولة
+npx tsx --test tests/db/migrations.pglite.test.ts
+
+# 2. اختبار المنطق الحسابي وأمان رموز QR وتوزيع الفرق
+npm test
+
+# 3. اختبار خلو الواجهات من تسريب مفاتيح الخدمة وإزالة التجاوزات
+npx tsx --test tests/security/static-guards.test.ts
+
+# 4. اختبار التكامل الحي مع Supabase (عند توفر المتغيرات)
+npx tsx --test tests/integration/supabase.live.test.ts
+
+# 5. الفحص البرمجي الكامل (0 أخطاء و 0 تحذيرات)
+npm run lint
+
+# 6. بناء حزمة الإنتاج الرسمية
+npm run build
 ```
 
 ---
 
-## 3. Database Migration Deployment
-1. Log into your [Supabase Dashboard](https://supabase.com/dashboard).
-2. Create a new project (e.g. `scout-hub-cairo`).
-3. Navigate to **SQL Editor**.
-4. Paste the complete migration script from `supabase/migrations/001_initial_schema.sql` and run it.
-5. Verify that all 15 tables and RLS policies are created successfully.
+## 6. إجراءات الطوارئ والنسخ الاحتياطي
 
----
-
-## 4. Bootstrapping the Super Admin
-There are two methods to establish your first administrator:
-1. **Automated via Env**:
-   - Set `INITIAL_SUPER_ADMIN_EMAIL=your-email@example.com` in `.env.local` or Vercel environment variables.
-   - Register an account with that email in the registration UI.
-   - The onboarding trigger will automatically assign the `super_admin` role.
-2. **Direct SQL Elevation**:
-   - Register normally through the `/register` page.
-   - Run in Supabase SQL editor:
-     ```sql
-     INSERT INTO user_roles (user_id, role)
-     SELECT id, 'super_admin' FROM profiles WHERE full_name = 'اسم القائد'
-     ON CONFLICT (user_id, role) DO NOTHING;
-     ```
-
----
-
-## 5. PWA & Mobile Installation Checklist
-- [x] Manifest file served at `/manifest.webmanifest`
-- [x] Theme color set to Forest Green (`#173C32`)
-- [x] Icons provided: 192x192, 512x512 with `maskable` and `any`
-- [x] Viewport meta tag configured with `viewport-fit=cover` for iOS notch safe areas
-- [x] Tested on iOS Safari ("Add to Home Screen") and Android Chrome ("Install App")
-
----
-
-## 6. Backup and Recovery
-- Enable Supabase automated daily backups.
-- For manual backup:
+- تفعيل النسخ الاحتياطي اليومي الآلي في Supabase.
+- تصدير نسخة احتياطية فورية قبل أي معسكر كبير:
   ```bash
-  # Export schema and data via pg_dump
-  pg_dump -h db.your-project.supabase.co -U postgres -d postgres -F c -b -v -f scout_hub_backup.dump
+  pg_dump -h db.your-project.supabase.co -U postgres -d postgres -F c -b -v -f scout_hub_production_backup.dump
   ```
