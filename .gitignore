@@ -20,7 +20,12 @@
 # production
 /build
 
-# misc
+# backups
+backups/
+*.dump
+*.sql.bak
+.temp/
+supabase/.temp/
 .DS_Store
 *.pem
 

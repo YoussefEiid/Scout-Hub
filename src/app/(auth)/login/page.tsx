@@ -34,18 +34,40 @@ function LoginFormContent() {
     if (supabase) {
       // Real Supabase Auth Flow
       try {
-        const { error: authErr } = await supabase.auth.signInWithPassword({
+        const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
           email: identifier.trim(),
           password,
         });
 
-        if (authErr) {
-          setError(authErr.message || 'بيانات الدخول غير صحيحة');
+        if (authErr || !authData?.user) {
+          setError(authErr?.message || 'بيانات الدخول غير صحيحة');
           setIsLoading(false);
           return;
         }
 
-        router.push(redirectPath);
+        let destination = redirectPath;
+        if (redirectPath === '/dashboard') {
+          const { data: roleRows } = await supabase
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', authData.user.id);
+          const roles = (roleRows ?? []).map((r: { role: string }) => r.role);
+          if (roles.includes('super_admin')) {
+            destination = '/super-admin';
+          } else if (
+            roles.includes('section_leader') ||
+            roles.includes('assistant_leader') ||
+            roles.includes('admin') ||
+            roles.includes('attendance_leader')
+          ) {
+            destination = '/leader';
+          } else {
+            destination = '/dashboard';
+          }
+        }
+
+        router.push(destination);
+        router.refresh();
       } catch (err: any) {
         setError(err?.message || 'حدث خطأ غير متوقع أثناء الاتصال بقاعدة البيانات');
         setIsLoading(false);

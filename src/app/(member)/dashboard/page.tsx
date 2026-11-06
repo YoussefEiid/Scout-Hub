@@ -90,8 +90,9 @@ export default function MemberDashboardPage() {
             </h1>
 
             <p className="text-xs sm:text-sm text-sand leading-relaxed">
-              رقم قيدك الكشفي: <strong className="font-mono text-white">{member.member_number}</strong> — مرحلة{' '}
-              <strong>{stageNames[member.stage_id]}</strong>
+              رقم قيدك الكشفي: <strong className="font-mono text-white">{member.member_number}</strong> — قسم{' '}
+              <strong>{member.section?.name || stageNames[member.stage_id] || 'الكشافة'}</strong>
+              {member.year?.name && <span> ({member.year.name})</span>}
             </p>
 
             <div className="pt-2 flex items-center gap-2 flex-wrap">

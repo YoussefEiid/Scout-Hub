@@ -1,9 +1,9 @@
-export type ScoutStageId = 'stage_1' | 'stage_2' | 'stage_3';
+export type ScoutStageId = 'stage_1' | 'stage_2' | 'stage_3' | string;
 
 export interface ScoutStage {
   id: ScoutStageId;
   name_ar: string;
-  code: 'cubs' | 'scouts' | 'advanced';
+  code: 'cubs' | 'scouts' | 'advanced' | string;
   description?: string;
   min_age?: number;
   max_age?: number;
@@ -11,13 +11,59 @@ export interface ScoutStage {
 
 export type CommitmentPreference = 'committed' | 'inactive' | 'circumstances';
 
-export type UserRoleType = 'super_admin' | 'admin' | 'attendance_leader' | 'member';
+export type UserRoleType =
+  | 'super_admin'
+  | 'admin'
+  | 'section_leader'
+  | 'assistant_leader'
+  | 'attendance_leader'
+  | 'member';
+
+export interface ScoutSection {
+  id: string;
+  code: string;
+  name: string;
+  description?: string | null;
+  icon: string;
+  color_theme: string;
+  display_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  years?: ScoutSectionYear[];
+}
+
+export interface ScoutSectionYear {
+  id: string;
+  section_id: string;
+  name: string;
+  code?: string | null;
+  display_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  section?: ScoutSection;
+}
+
+export interface StaffScopeAssignment {
+  id: string;
+  user_id: string;
+  section_id: string;
+  year_id?: string | null;
+  assigned_by?: string | null;
+  created_at: string;
+  section?: ScoutSection;
+  year?: ScoutSectionYear | null;
+  user?: Profile;
+}
 
 export interface MemberSummary {
   id: string;
   member_number: string;
   full_name: string;
   stage_id: ScoutStageId;
+  section_id?: string | null;
+  year_id?: string | null;
 }
 
 export interface Profile extends MemberSummary {
@@ -28,8 +74,11 @@ export interface Profile extends MemberSummary {
   created_at: string;
   updated_at: string;
   stage?: ScoutStage;
+  section?: ScoutSection;
+  year?: ScoutSectionYear;
   roles?: UserRoleType[];
   active_team?: Team | null;
+  scope_assignments?: StaffScopeAssignment[];
 }
 
 export interface UserRole {
@@ -58,6 +107,8 @@ export interface TeamDistribution {
   status: DistributionStatus;
   version_number: number;
   random_seed: string;
+  section_id?: string | null;
+  section?: ScoutSection;
   is_current_published: boolean;
   published_at?: string | null;
   created_by?: string | null;
@@ -71,6 +122,10 @@ export interface Team {
   distribution_id: string;
   name: string;
   stage_id?: ScoutStageId | null;
+  section_id?: string | null;
+  year_id?: string | null;
+  section?: ScoutSection;
+  year?: ScoutSectionYear;
   leader_id?: string | null;
   color_hex: string;
   icon_name: string;
@@ -97,6 +152,8 @@ export interface FridaySession {
   start_time: string; // HH:MM:SS
   late_threshold_time: string; // HH:MM:SS
   is_open_for_attendance: boolean;
+  section_id?: string | null;
+  section?: ScoutSection;
   response_deadline?: string | null;
   notes?: string | null;
   created_at: string;

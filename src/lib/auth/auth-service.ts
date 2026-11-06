@@ -2,20 +2,55 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { AppError } from '@/lib/actions/result';
 import { CONFIG_MISSING_MESSAGE, getBackendMode } from '@/lib/config/runtime';
 import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { getUserRoles } from '@/lib/supabase/supabase-service';
-import type { UserRoleType } from '@/types';
+import { getUserRoles, getProfile, getStaffScopeAssignments } from '@/lib/supabase/supabase-service';
+import type { UserRoleType, Profile, StaffScopeAssignment } from '@/types';
 
+export const SUPER_ADMIN_ROLES: UserRoleType[] = ['super_admin'];
 export const ADMIN_ROLES: UserRoleType[] = ['super_admin', 'admin'];
-export const STAFF_ROLES: UserRoleType[] = ['super_admin', 'admin', 'attendance_leader'];
-export const ANY_ROLE: UserRoleType[] = ['super_admin', 'admin', 'attendance_leader', 'member'];
+export const LEADER_ROLES: UserRoleType[] = ['super_admin', 'admin', 'section_leader', 'assistant_leader'];
+export const STAFF_ROLES: UserRoleType[] = [
+  'super_admin',
+  'admin',
+  'section_leader',
+  'assistant_leader',
+  'attendance_leader',
+];
+export const ANY_ROLE: UserRoleType[] = [
+  'super_admin',
+  'admin',
+  'section_leader',
+  'assistant_leader',
+  'attendance_leader',
+  'member',
+];
 
 export interface SessionContext {
   mode: 'demo' | 'supabase';
   userId: string;
   email?: string;
   roles: UserRoleType[];
+  profile?: Profile | null;
+  scopes?: StaffScopeAssignment[];
   /** Per-request, RLS-bound client (anon key + user's JWT). Null only in explicit local demo mode. */
   client: SupabaseClient | null;
+}
+
+/**
+ * Determine default dashboard path based on user roles.
+ */
+export function getDefaultRedirectForRole(roles: UserRoleType[]): string {
+  if (roles.includes('super_admin')) {
+    return '/super-admin';
+  }
+  if (
+    roles.includes('section_leader') ||
+    roles.includes('assistant_leader') ||
+    roles.includes('admin') ||
+    roles.includes('attendance_leader')
+  ) {
+    return '/leader';
+  }
+  return '/dashboard';
 }
 
 /**
@@ -35,7 +70,7 @@ export async function requireSession(allowed: UserRoleType[] = ANY_ROLE): Promis
   }
 
   if (mode === 'demo') {
-    const roles: UserRoleType[] = ['super_admin', 'admin', 'attendance_leader', 'member'];
+    const roles: UserRoleType[] = ['super_admin', 'admin', 'section_leader', 'attendance_leader', 'member'];
     if (!roles.some((r) => allowed.includes(r))) {
       throw new AppError('FORBIDDEN', 'ليس لديك الصلاحية للقيام بهذه العملية.');
     }
@@ -58,6 +93,51 @@ export async function requireSession(allowed: UserRoleType[] = ANY_ROLE): Promis
   }
 
   return { mode: 'supabase', userId: user.id, email: user.email, roles, client };
+}
+
+/**
+ * Get current session for Server Components (returns null if unauthenticated, never throws).
+ */
+export async function getCurrentSession(): Promise<SessionContext | null> {
+  const mode = getBackendMode();
+  if (mode === 'misconfigured') return null;
+
+  if (mode === 'demo') {
+    const roles: UserRoleType[] = ['super_admin', 'section_leader', 'member'];
+    return {
+      mode: 'demo',
+      userId: 'demo-user',
+      email: 'demo@scouthub.app',
+      roles,
+      client: null,
+    };
+  }
+
+  try {
+    const client = await createServerSupabaseClient();
+    const {
+      data: { user },
+      error,
+    } = await client.auth.getUser();
+
+    if (error || !user) return null;
+
+    const roles = await getUserRoles(client, user.id);
+    const profile = await getProfile(client, user.id);
+    const scopes = await getStaffScopeAssignments(client, user.id);
+
+    return {
+      mode: 'supabase',
+      userId: user.id,
+      email: user.email,
+      roles,
+      profile,
+      scopes,
+      client,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function hasRole(ctx: SessionContext, ...roles: UserRoleType[]): boolean {

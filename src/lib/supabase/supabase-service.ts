@@ -5,6 +5,9 @@ import type {
   FridaySession,
   MemberSummary,
   Profile,
+  ScoutSection,
+  ScoutSectionYear,
+  StaffScopeAssignment,
   Team,
   TeamDistribution,
   UniformStatus,
@@ -17,7 +20,7 @@ import type {
 /**
  * Real database access (Supabase / PostgreSQL). Every function receives the per-request,
  * RLS-bound client; privileged writes happen inside SECURITY DEFINER functions defined in
- * supabase/migrations/002_production_hardening.sql, which re-check the caller's role in SQL.
+ * supabase/migrations/002_production_hardening.sql and 003_dynamic_scout_structure_and_role_isolation.sql.
  *
  * Nothing here logs credentials or QR tokens.
  */
@@ -29,19 +32,23 @@ async function callRpc<T>(client: SupabaseClient, fn: string, args: Record<strin
 }
 
 const PROFILE_COLUMNS =
-  'id, member_number, full_name, stage_id, initial_commitment, avatar_url, is_active, created_at, updated_at';
+  'id, member_number, full_name, stage_id, section_id, year_id, initial_commitment, avatar_url, is_active, created_at, updated_at';
 
 interface ProfileRow {
   id: string;
   member_number: string;
   full_name: string;
   stage_id: Profile['stage_id'];
+  section_id?: string | null;
+  year_id?: string | null;
   initial_commitment: Profile['initial_commitment'];
   avatar_url: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
   user_roles?: { role: UserRoleType }[];
+  scout_sections?: ScoutSection | null;
+  scout_section_years?: ScoutSectionYear | null;
 }
 
 function toProfile(row: ProfileRow): Profile {
@@ -50,6 +57,10 @@ function toProfile(row: ProfileRow): Profile {
     member_number: row.member_number,
     full_name: row.full_name,
     stage_id: row.stage_id,
+    section_id: row.section_id,
+    year_id: row.year_id,
+    section: row.scout_sections ?? undefined,
+    year: row.scout_section_years ?? undefined,
     initial_commitment: row.initial_commitment,
     avatar_url: row.avatar_url,
     is_active: row.is_active,
@@ -67,11 +78,11 @@ export async function getUserRoles(client: SupabaseClient, userId: string): Prom
   return (data ?? []).map((r: { role: UserRoleType }) => r.role);
 }
 
-/** Phone numbers are deliberately never selected: no screen needs them. */
+/** Lists members visible to the caller under RLS rules */
 export async function listMembers(client: SupabaseClient): Promise<Profile[]> {
   const { data, error } = await client
     .from('profiles')
-    .select(`${PROFILE_COLUMNS}, user_roles(role)`)
+    .select(`${PROFILE_COLUMNS}, user_roles(role), scout_sections(*), scout_section_years(*)`)
     .order('created_at', { ascending: false });
   if (error) throw mapDbError(error);
   return ((data ?? []) as unknown as ProfileRow[]).map(toProfile);
@@ -80,14 +91,193 @@ export async function listMembers(client: SupabaseClient): Promise<Profile[]> {
 export async function getProfile(client: SupabaseClient, id: string): Promise<Profile | null> {
   const { data, error } = await client
     .from('profiles')
-    .select(`${PROFILE_COLUMNS}, user_roles(role)`)
+    .select(`${PROFILE_COLUMNS}, user_roles(role), scout_sections(*), scout_section_years(*)`)
     .eq('id', id)
     .maybeSingle();
   if (error) throw mapDbError(error);
   return data ? toProfile(data as unknown as ProfileRow) : null;
 }
 
-// ---------------------------------------------------------------------------- QR
+export async function updateProfile(
+  client: SupabaseClient,
+  userId: string,
+  updates: { full_name?: string; phone?: string; avatar_url?: string }
+): Promise<Profile> {
+  const { data, error } = await client
+    .from('profiles')
+    .update(updates)
+    .eq('id', userId)
+    .select(`${PROFILE_COLUMNS}, user_roles(role), scout_sections(*), scout_section_years(*)`)
+    .single();
+  if (error) throw mapDbError(error);
+  return toProfile(data as unknown as ProfileRow);
+}
+
+// ---------------------------------------------------------------- scout sections & years
+
+export async function listScoutSections(client: SupabaseClient): Promise<ScoutSection[]> {
+  const { data, error } = await client
+    .from('scout_sections')
+    .select('*, scout_section_years(*)')
+    .order('display_order', { ascending: true });
+  if (error) throw mapDbError(error);
+  return (data ?? []).map((s: any) => ({
+    ...s,
+    years: (s.scout_section_years ?? []).sort((a: any, b: any) => a.display_order - b.display_order),
+  }));
+}
+
+export async function listActiveScoutSections(client: SupabaseClient): Promise<ScoutSection[]> {
+  const { data, error } = await client
+    .from('scout_sections')
+    .select('*, scout_section_years(*)')
+    .eq('is_active', true)
+    .order('display_order', { ascending: true });
+  if (error) throw mapDbError(error);
+  return (data ?? []).map((s: any) => ({
+    ...s,
+    years: (s.scout_section_years ?? [])
+      .filter((y: any) => y.is_active)
+      .sort((a: any, b: any) => a.display_order - b.display_order),
+  }));
+}
+
+export async function createScoutSection(
+  client: SupabaseClient,
+  input: {
+    code: string;
+    name: string;
+    description?: string;
+    icon?: string;
+    color_theme?: string;
+    display_order?: number;
+  }
+): Promise<ScoutSection> {
+  const { data, error } = await client
+    .from('scout_sections')
+    .insert({
+      code: input.code.toLowerCase().trim(),
+      name: input.name.trim(),
+      description: input.description?.trim() || null,
+      icon: input.icon || 'compass',
+      color_theme: input.color_theme || '#23836B',
+      display_order: input.display_order ?? 0,
+      is_active: true,
+    })
+    .select()
+    .single();
+  if (error) throw mapDbError(error);
+  return data as ScoutSection;
+}
+
+export async function updateScoutSection(
+  client: SupabaseClient,
+  id: string,
+  updates: Partial<ScoutSection>
+): Promise<ScoutSection> {
+  const { data, error } = await client
+    .from('scout_sections')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw mapDbError(error);
+  return data as ScoutSection;
+}
+
+export async function listSectionYears(
+  client: SupabaseClient,
+  sectionId?: string
+): Promise<ScoutSectionYear[]> {
+  let query = client.from('scout_section_years').select('*').order('display_order', { ascending: true });
+  if (sectionId) {
+    query = query.eq('section_id', sectionId);
+  }
+  const { data, error } = await query;
+  if (error) throw mapDbError(error);
+  return (data ?? []) as ScoutSectionYear[];
+}
+
+export async function createSectionYear(
+  client: SupabaseClient,
+  input: { section_id: string; name: string; display_order?: number }
+): Promise<ScoutSectionYear> {
+  const { data, error } = await client
+    .from('scout_section_years')
+    .insert({
+      section_id: input.section_id,
+      name: input.name.trim(),
+      display_order: input.display_order ?? 0,
+      is_active: true,
+    })
+    .select()
+    .single();
+  if (error) throw mapDbError(error);
+  return data as ScoutSectionYear;
+}
+
+export async function updateSectionYear(
+  client: SupabaseClient,
+  id: string,
+  updates: Partial<ScoutSectionYear>
+): Promise<ScoutSectionYear> {
+  const { data, error } = await client
+    .from('scout_section_years')
+    .update({ ...updates, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw mapDbError(error);
+  return data as ScoutSectionYear;
+}
+
+// ---------------------------------------------------------------- staff scope assignments
+
+export async function getStaffScopeAssignments(
+  client: SupabaseClient,
+  userId?: string
+): Promise<StaffScopeAssignment[]> {
+  let query = client
+    .from('staff_scope_assignments')
+    .select('*, scout_sections(*), scout_section_years(*), profiles!staff_scope_assignments_user_id_fkey(full_name, member_number)');
+
+  if (userId) {
+    query = query.eq('user_id', userId);
+  }
+
+  const { data, error } = await query;
+  if (error) throw mapDbError(error);
+  return (data ?? []).map((row: any) => ({
+    id: row.id,
+    user_id: row.user_id,
+    section_id: row.section_id,
+    year_id: row.year_id,
+    assigned_by: row.assigned_by,
+    created_at: row.created_at,
+    section: row.scout_sections,
+    year: row.scout_section_years,
+    user: row.profiles,
+  }));
+}
+
+export async function assignStaffScope(
+  client: SupabaseClient,
+  userId: string,
+  sectionId: string,
+  yearId?: string | null
+): Promise<string> {
+  return callRpc<string>(client, 'assign_staff_scope', {
+    p_user_id: userId,
+    p_section_id: sectionId,
+    p_year_id: yearId ?? null,
+  });
+}
+
+export async function revokeStaffScope(client: SupabaseClient, assignmentId: string): Promise<void> {
+  await callRpc<void>(client, 'revoke_staff_scope', { p_assignment_id: assignmentId });
+}
+
+// ---------------------------------------------------------------- QR
 
 export async function getOrCreateMyQr(client: SupabaseClient): Promise<string> {
   return callRpc<string>(client, 'get_or_create_my_qr');
@@ -99,27 +289,57 @@ export async function rotateQr(client: SupabaseClient, memberId: string, reason:
 }
 
 export interface QrVerification {
-  status: 'valid' | 'invalid' | 'revoked' | 'inactive';
-  member?: { id: string; full_name: string; member_number: string; stage_id: Profile['stage_id']; team_name: string | null };
+  status: 'valid' | 'invalid' | 'revoked' | 'inactive' | 'unauthorized_scope';
+  member?: {
+    id: string;
+    full_name: string;
+    member_number: string;
+    stage_id: Profile['stage_id'];
+    section_id?: string;
+    year_id?: string;
+    team_name: string | null;
+  };
 }
 
 export async function verifyQr(client: SupabaseClient, token: string): Promise<QrVerification> {
   return callRpc<QrVerification>(client, 'verify_qr_credential', { p_token: token });
 }
 
-// ------------------------------------------------------------------- attendance
+// ---------------------------------------------------------------- attendance
 
 export type AttendanceFailureCode =
-  | 'INVALID_UNIFORM' | 'SESSION_NOT_FOUND' | 'SESSION_CLOSED' | 'INVALID_QR' | 'REVOKED_QR'
-  | 'MEMBER_REQUIRED' | 'REASON_REQUIRED' | 'MEMBER_NOT_FOUND' | 'DUPLICATE' | 'RECORD_NOT_FOUND';
+  | 'INVALID_UNIFORM'
+  | 'SESSION_NOT_FOUND'
+  | 'SESSION_CLOSED'
+  | 'INVALID_QR'
+  | 'REVOKED_QR'
+  | 'MEMBER_REQUIRED'
+  | 'REASON_REQUIRED'
+  | 'MEMBER_NOT_FOUND'
+  | 'DUPLICATE'
+  | 'RECORD_NOT_FOUND'
+  | 'UNAUTHORIZED_SCOPE'
+  | 'SECTION_MISMATCH';
 
 export type AttendanceRpcResult =
-  | { success: true; record_id: string; arrival_status: 'on_time' | 'late'; recorded_at: string; member: { id: string; full_name: string; member_number: string } }
+  | {
+      success: true;
+      record_id: string;
+      arrival_status: 'on_time' | 'late';
+      recorded_at: string;
+      member: { id: string; full_name: string; member_number: string };
+    }
   | { success: false; code: AttendanceFailureCode };
 
 export async function recordAttendance(
   client: SupabaseClient,
-  params: { sessionId: string; uniform: UniformStatus; qrToken?: string | null; memberId?: string | null; manualReason?: string | null }
+  params: {
+    sessionId: string;
+    uniform: UniformStatus;
+    qrToken?: string | null;
+    memberId?: string | null;
+    manualReason?: string | null;
+  }
 ): Promise<AttendanceRpcResult> {
   return callRpc<AttendanceRpcResult>(client, 'record_attendance', {
     p_session_id: params.sessionId,
@@ -130,114 +350,83 @@ export async function recordAttendance(
   });
 }
 
-export async function correctAttendance(
-  client: SupabaseClient,
-  params: { recordId: string; newRecordedAt?: string | null; uniform?: UniformStatus | null; reason: string }
-): Promise<{ success: boolean; code?: AttendanceFailureCode }> {
-  return callRpc(client, 'correct_attendance', {
-    p_record_id: params.recordId,
-    p_new_recorded_at: params.newRecordedAt ?? null,
-    p_uniform: params.uniform ?? null,
-    p_reason: params.reason,
-  });
-}
+export async function listSessions(client: SupabaseClient, sectionId?: string): Promise<FridaySession[]> {
+  let query = client
+    .from('friday_sessions')
+    .select('*, scout_sections(*)')
+    .order('session_date', { ascending: false });
 
-interface AttendanceRow extends Omit<AttendanceRecord, 'member' | 'recorder'> {
-  profiles: MemberSummary | null;
+  if (sectionId) {
+    query = query.or(`section_id.eq.${sectionId},section_id.is.null`);
+  }
+
+  const { data, error } = await query;
+  if (error) throw mapDbError(error);
+  return (data ?? []).map((row: any) => ({
+    ...row,
+    section: row.scout_sections,
+  })) as FridaySession[];
 }
 
 export async function listAttendance(client: SupabaseClient, sessionId: string): Promise<AttendanceRecord[]> {
   const { data, error } = await client
     .from('attendance_records')
     .select(
-      'id, session_id, member_id, qr_credential_id, uniform_status, arrival_status, recorded_at, recorded_by, is_manual, manual_reason, original_recorded_at, edit_reason, edited_by, profiles:member_id(id, member_number, full_name, stage_id)'
+      'id, session_id, member_id, uniform_status, arrival_status, recorded_at, recorded_by, is_manual, manual_reason, original_recorded_at, edit_reason, edited_by, profiles!attendance_records_member_id_fkey(id, member_number, full_name, stage_id, section_id, year_id)'
     )
     .eq('session_id', sessionId)
     .order('recorded_at', { ascending: false });
   if (error) throw mapDbError(error);
-  return ((data ?? []) as unknown as AttendanceRow[]).map(({ profiles, ...rest }) => ({
-    ...rest,
-    // Never expose the bearer credential id to the browser.
-    qr_credential_id: null,
-    member: profiles ?? undefined,
-  }));
+  return ((data ?? []) as any[]).map((r) => ({
+    ...r,
+    member: r.profiles,
+  })) as AttendanceRecord[];
 }
 
-// -------------------------------------------------------------------- sessions
-
-export async function listSessions(client: SupabaseClient): Promise<FridaySession[]> {
-  const { data, error } = await client.from('friday_sessions').select('*').order('session_date', { ascending: false });
-  if (error) throw mapDbError(error);
-  return (data ?? []) as FridaySession[];
-}
-
-export async function createSession(
-  client: SupabaseClient,
-  input: { date: string; title: string; startTime: string; lateThresholdTime: string; notes?: string | null; actorId: string }
-): Promise<FridaySession> {
-  const { data, error } = await client
-    .from('friday_sessions')
-    .insert({
-      session_date: input.date,
-      title: input.title,
-      start_time: input.startTime,
-      late_threshold_time: input.lateThresholdTime,
-      notes: input.notes ?? null,
-      created_by: input.actorId,
-    })
-    .select('*')
-    .single();
-  if (error) {
-    if (error.code === '23505') throw new AppError('CONFLICT', 'يوجد اجتماع مسجل بالفعل في هذا التاريخ.');
-    if (error.message.includes('chk_session_is_friday')) throw new AppError('VALIDATION', 'يجب أن يكون تاريخ الاجتماع يوم جمعة.');
-    throw mapDbError(error);
-  }
-  return data as FridaySession;
-}
-
-export async function setSessionOpen(client: SupabaseClient, sessionId: string, open: boolean): Promise<void> {
-  const { data, error } = await client
-    .from('friday_sessions')
-    .update({ is_open_for_attendance: open })
-    .eq('id', sessionId)
-    .select('id');
-  if (error) throw mapDbError(error);
-  if (!data || data.length === 0) throw new AppError('FORBIDDEN', 'تعذر تحديث حالة الاجتماع.');
-}
+// ---------------------------------------------------------------- weekly responses
 
 export async function submitWeeklyResponse(
   client: SupabaseClient,
   sessionId: string,
   response: WeeklyResponseType
-): Promise<{ success: boolean; code?: string }> {
-  return callRpc(client, 'submit_weekly_response', { p_session_id: sessionId, p_response: response });
+): Promise<{ success: boolean; code?: string; response?: WeeklyResponseType }> {
+  return callRpc(client, 'submit_weekly_response', {
+    p_session_id: sessionId,
+    p_response: response,
+  });
 }
 
-export async function getWeeklyResponse(client: SupabaseClient, sessionId: string, memberId: string): Promise<WeeklyResponse | null> {
+export async function getWeeklyResponse(
+  client: SupabaseClient,
+  sessionId: string,
+  memberId: string
+): Promise<WeeklyResponse | null> {
   const { data, error } = await client
     .from('weekly_responses')
-    .select('*')
+    .select('id, session_id, member_id, response, created_at, updated_at')
     .eq('session_id', sessionId)
     .eq('member_id', memberId)
     .maybeSingle();
   if (error) throw mapDbError(error);
-  return (data as WeeklyResponse | null) ?? null;
+  return data as WeeklyResponse | null;
 }
 
-// ------------------------------------------------------------------------ teams
+// ---------------------------------------------------------------- teams & distributions
 
 export interface DraftTeamInput {
   name: string;
-  stage_id: string | null;
-  color_hex: string;
-  icon_name: string;
-  leader_id: string | null;
+  stage_id?: string | null;
+  section_id?: string | null;
+  year_id?: string | null;
+  color_hex?: string;
+  icon_name?: string;
+  leader_id?: string | null;
   member_ids: string[];
 }
 
 export async function saveTeamDraft(
   client: SupabaseClient,
-  params: { title: string; mode: DistributionMode; seed: string; teams: DraftTeamInput[] }
+  params: { title: string; mode: DistributionMode; seed: string; teams: DraftTeamInput[]; sectionId?: string | null }
 ): Promise<string> {
   return callRpc<string>(client, 'save_team_distribution_draft', {
     p_title: params.title,
@@ -247,54 +436,81 @@ export async function saveTeamDraft(
   });
 }
 
-export async function swapDraftMembers(client: SupabaseClient, distributionId: string, a: string, b: string): Promise<void> {
-  await callRpc<null>(client, 'swap_draft_members', { p_distribution_id: distributionId, p_member_a: a, p_member_b: b });
+export async function swapDraftMembers(
+  client: SupabaseClient,
+  params: { distributionId: string; memberA: string; memberB: string }
+): Promise<void> {
+  await callRpc<void>(client, 'swap_draft_members', {
+    p_distribution_id: params.distributionId,
+    p_member_a: params.memberA,
+    p_member_b: params.memberB,
+  });
 }
 
-export async function moveDraftMember(client: SupabaseClient, distributionId: string, memberId: string, toTeamId: string): Promise<void> {
-  await callRpc<null>(client, 'move_draft_member', { p_distribution_id: distributionId, p_member_id: memberId, p_to_team_id: toTeamId });
-}
-
-export async function publishDistribution(client: SupabaseClient, distributionId: string): Promise<void> {
-  await callRpc(client, 'publish_team_distribution', { p_distribution_id: distributionId });
+export async function publishDistribution(client: SupabaseClient, distributionId: string): Promise<string> {
+  const res = await callRpc<{ success: boolean; distribution_id: string }>(
+    client,
+    'publish_team_distribution',
+    { p_distribution_id: distributionId }
+  );
+  return res.distribution_id;
 }
 
 export async function listDistributions(client: SupabaseClient): Promise<TeamDistribution[]> {
-  const { data, error } = await client.from('team_distributions').select('*').order('created_at', { ascending: false });
-  if (error) throw mapDbError(error);
-  return (data ?? []) as TeamDistribution[];
-}
-
-interface DistributionDetailRow extends Omit<TeamDistribution, 'teams'> {
-  teams: (Omit<Team, 'memberships'> & {
-    team_memberships: { id: string; team_id: string; member_id: string; is_leader: boolean; created_at: string; profiles: MemberSummary | null }[];
-  })[];
-}
-
-/** Admin-only (RLS): full roster of any distribution including drafts. */
-export async function getDistributionDetail(client: SupabaseClient, id: string): Promise<TeamDistribution | null> {
   const { data, error } = await client
     .from('team_distributions')
-    .select(
-      '*, teams(id, distribution_id, name, stage_id, leader_id, color_hex, icon_name, total_points, created_at, team_memberships(id, team_id, member_id, is_leader, created_at, profiles:member_id(id, full_name, stage_id)))'
-    )
-    .eq('id', id)
-    .maybeSingle();
+    .select('id, title, mode, status, version_number, random_seed, is_current_published, published_at, created_by, created_at, updated_at, scout_sections(*)')
+    .order('version_number', { ascending: false });
   if (error) throw mapDbError(error);
-  if (!data) return null;
-  const row = data as unknown as DistributionDetailRow;
+  return ((data ?? []) as any[]).map((d) => ({
+    ...d,
+    section: d.scout_sections,
+  })) as TeamDistribution[];
+}
+
+export async function getDistributionDetail(
+  client: SupabaseClient,
+  distributionId: string
+): Promise<TeamDistribution | null> {
+  const { data: dist, error: dErr } = await client
+    .from('team_distributions')
+    .select('*, scout_sections(*)')
+    .eq('id', distributionId)
+    .maybeSingle();
+  if (dErr) throw mapDbError(dErr);
+  if (!dist) return null;
+
+  const { data: teams, error: tErr } = await client
+    .from('teams')
+    .select(
+      'id, distribution_id, name, stage_id, section_id, year_id, leader_id, color_hex, icon_name, total_points, created_at, team_memberships(id, team_id, member_id, is_leader, profiles(id, member_number, full_name, stage_id, section_id, year_id))'
+    )
+    .eq('distribution_id', distributionId);
+  if (tErr) throw mapDbError(tErr);
+
   return {
-    ...row,
-    teams: row.teams.map(({ team_memberships, ...team }) => ({
-      ...team,
-      member_count: team_memberships.length,
-      memberships: team_memberships.map((m) => ({
+    ...dist,
+    section: dist.scout_sections,
+    teams: (teams ?? []).map((t: any) => ({
+      id: t.id,
+      distribution_id: t.distribution_id,
+      name: t.name,
+      stage_id: t.stage_id,
+      section_id: t.section_id,
+      year_id: t.year_id,
+      leader_id: t.leader_id,
+      color_hex: t.color_hex,
+      icon_name: t.icon_name,
+      total_points: t.total_points,
+      created_at: t.created_at,
+      member_count: t.team_memberships?.length ?? 0,
+      memberships: (t.team_memberships ?? []).map((m: any) => ({
         id: m.id,
         team_id: m.team_id,
         member_id: m.member_id,
         is_leader: m.is_leader,
-        created_at: m.created_at,
-        member: m.profiles ?? undefined,
+        created_at: dist.created_at,
+        member: m.profiles,
       })),
     })),
   };

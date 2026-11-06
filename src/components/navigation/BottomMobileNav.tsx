@@ -1,18 +1,53 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Compass, QrCode, Users, ShieldCheck } from 'lucide-react';
+import {
+  Compass,
+  QrCode,
+  Users,
+  ShieldCheck,
+  User,
+  Layers,
+  UserCheck,
+  Calendar,
+  Home,
+  LogIn,
+} from 'lucide-react';
 import { clsx } from 'clsx';
+import { createClient } from '@/lib/supabase/client';
 
 interface BottomMobileNavProps {
   currentRole?: string;
 }
 
-export function BottomMobileNav({ currentRole = 'member' }: BottomMobileNavProps) {
+export function BottomMobileNav({ currentRole: initialRole }: BottomMobileNavProps) {
   const pathname = usePathname();
-  const isStaff = currentRole === 'admin' || currentRole === 'super_admin' || currentRole === 'attendance_leader';
+  const [role, setRole] = useState<string | undefined>(initialRole);
+
+  useEffect(() => {
+    if (!initialRole) {
+      const supabase = createClient();
+      if (!supabase) return;
+      supabase.auth.getUser().then(({ data: { user } }) => {
+        if (user) {
+          supabase
+            .from('user_roles')
+            .select('role')
+            .eq('user_id', user.id)
+            .then(({ data: roles }) => {
+              const roleList = (roles ?? []).map((r: { role: string }) => r.role);
+              if (roleList.includes('super_admin')) setRole('super_admin');
+              else if (roleList.includes('section_leader') || roleList.includes('admin')) setRole('section_leader');
+              else if (roleList.includes('assistant_leader') || roleList.includes('attendance_leader'))
+                setRole('assistant_leader');
+              else setRole('member');
+            });
+        }
+      });
+    }
+  }, [initialRole]);
 
   interface NavTab {
     href: string;
@@ -21,27 +56,48 @@ export function BottomMobileNav({ currentRole = 'member' }: BottomMobileNavProps
     highlight?: boolean;
   }
 
-  const memberTabs: NavTab[] = [
-    { href: '/dashboard', label: 'لوحتي', icon: Compass },
-    { href: '/card', label: 'بطاقتي', icon: QrCode },
-    { href: '/team', label: 'فريقي', icon: Users },
-  ];
+  const isSuperAdmin = role === 'super_admin';
+  const isLeader = role === 'section_leader' || role === 'admin' || role === 'assistant_leader' || role === 'attendance_leader';
+  const isMember = role === 'member';
 
-  const staffTabs: NavTab[] = [
-    { href: '/dashboard', label: 'لوحتي', icon: Compass },
-    { href: '/card', label: 'بطاقتي', icon: QrCode },
-    { href: '/admin/scanner', label: 'الماسح', icon: QrCode, highlight: true },
-    { href: '/admin/teams', label: 'الفرق', icon: Users },
-    { href: '/admin/reports', label: 'الإدارة', icon: ShieldCheck },
-  ];
+  let tabs: NavTab[];
 
-  const tabs = isStaff ? staffTabs : memberTabs;
+  if (isSuperAdmin) {
+    tabs = [
+      { href: '/super-admin', label: 'الرئيسية', icon: Layers },
+      { href: '/super-admin/sections', label: 'الأقسام', icon: Compass },
+      { href: '/super-admin/leaders', label: 'القادة', icon: UserCheck, highlight: true },
+      { href: '/super-admin/members', label: 'الأعضاء', icon: Users },
+      { href: '/profile', label: 'ملفي', icon: User },
+    ];
+  } else if (isLeader) {
+    tabs = [
+      { href: '/leader', label: 'لوحتي', icon: Compass },
+      { href: '/leader/members', label: 'الكشافين', icon: Users },
+      { href: '/leader/scanner', label: 'الماسح', icon: QrCode, highlight: true },
+      { href: '/leader/teams', label: 'الفرق', icon: Users },
+      { href: '/profile', label: 'ملفي', icon: User },
+    ];
+  } else if (isMember) {
+    tabs = [
+      { href: '/dashboard', label: 'لوحتي', icon: Compass },
+      { href: '/card', label: 'بطاقتي', icon: QrCode, highlight: true },
+      { href: '/team', label: 'فريقي', icon: Users },
+      { href: '/profile', label: 'ملفي', icon: User },
+    ];
+  } else {
+    tabs = [
+      { href: '/', label: 'الرئيسية', icon: Home },
+      { href: '/register', label: 'انضمام', icon: Compass, highlight: true },
+      { href: '/login', label: 'دخول', icon: LogIn },
+    ];
+  }
 
   return (
     <nav className="fixed bottom-0 inset-x-0 z-40 bg-white/95 backdrop-blur-md border-t border-sand/60 pb-safe md:hidden shadow-lg no-print">
       <div className="flex items-center justify-around h-16 px-2 max-w-md mx-auto">
         {tabs.map((tab) => {
-          const isActive = pathname === tab.href || (tab.href !== '/dashboard' && pathname?.startsWith(tab.href));
+          const isActive = pathname === tab.href || (tab.href !== '/dashboard' && tab.href !== '/' && tab.href !== '/leader' && tab.href !== '/super-admin' && pathname?.startsWith(tab.href));
           const Icon = tab.icon;
 
           if (tab.highlight) {

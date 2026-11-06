@@ -1,24 +1,61 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Compass, User, Phone, CheckCircle2, AlertCircle, ArrowLeft } from 'lucide-react';
-import { ScoutStageId, CommitmentPreference } from '@/types';
-import { registerMemberAction } from '@/app/actions/scout-actions';
+import { Compass, User, Phone, CheckCircle2, AlertCircle, ArrowLeft, Layers, Calendar } from 'lucide-react';
+import { CommitmentPreference, ScoutSection } from '@/types';
+import { registerMemberAction, getActiveScoutSectionsAction } from '@/app/actions/scout-actions';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 
 export default function RegisterPage() {
   const [fullName, setFullName] = useState('');
-  const [stageId, setStageId] = useState<ScoutStageId>('stage_2');
+  const [sections, setSections] = useState<ScoutSection[]>([]);
+  const [selectedSectionId, setSelectedSectionId] = useState<string>('');
+  const [selectedYearId, setSelectedYearId] = useState<string>('');
   const [commitment, setCommitment] = useState<CommitmentPreference>('committed');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [agreedPrivacy, setAgreedPrivacy] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoadingSections, setIsLoadingSections] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMemberNumber, setSuccessMemberNumber] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadSections() {
+      try {
+        const data = await getActiveScoutSectionsAction();
+        setSections(data);
+        if (data.length > 0) {
+          const firstSection = data[0];
+          setSelectedSectionId(firstSection.id);
+          if (firstSection.years && firstSection.years.length > 0) {
+            setSelectedYearId(firstSection.years[0].id);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load active sections', err);
+      } finally {
+        setIsLoadingSections(false);
+      }
+    }
+    loadSections();
+  }, []);
+
+  const currentSection = sections.find((s) => s.id === selectedSectionId);
+  const currentYears = currentSection?.years || [];
+
+  const handleSectionChange = (sectionId: string) => {
+    setSelectedSectionId(sectionId);
+    const sec = sections.find((s) => s.id === sectionId);
+    if (sec && sec.years && sec.years.length > 0) {
+      setSelectedYearId(sec.years[0].id);
+    } else {
+      setSelectedYearId('');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,6 +63,21 @@ export default function RegisterPage() {
 
     if (!fullName.trim() || fullName.trim().length < 3) {
       setError('يرجى كتابة الاسم الثلاثي على الأقل');
+      return;
+    }
+
+    if (!selectedSectionId || !selectedYearId) {
+      setError('يرجى اختيار القسم الكشفي والسنة الكشفية');
+      return;
+    }
+
+    if (!email.trim() || !password) {
+      setError('البريد الإلكتروني وكلمة المرور مطلوبان لإنشاء الحساب');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
       return;
     }
 
@@ -38,11 +90,12 @@ export default function RegisterPage() {
     try {
       const profile = await registerMemberAction({
         fullName: fullName.trim(),
-        stageId,
+        sectionId: selectedSectionId,
+        yearId: selectedYearId,
         commitment,
         phone: phone.trim() || undefined,
-        email: email.trim() || undefined,
-        password: password || undefined,
+        email: email.trim(),
+        password,
       });
 
       setSuccessMemberNumber(profile.member_number);
@@ -118,18 +171,48 @@ export default function RegisterPage() {
                 </div>
               </div>
 
-              {/* Scout Stage */}
+              {/* Scout Section Selection (Dynamic) */}
               <div>
-                <label className="block text-xs font-bold text-charcoal/80 mb-1">المرحلة الكشفية *</label>
-                <select
-                  value={stageId}
-                  onChange={(e) => setStageId(e.target.value as ScoutStageId)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
-                >
-                  <option value="stage_1">المرحلة الأولى (الأشبال والزهرات — من 7 إلى 11 سنة)</option>
-                  <option value="stage_2">المرحلة الثانية (الفتيان والمرشدات — من 12 إلى 14 سنة)</option>
-                  <option value="stage_3">المرحلة الثالثة (المتقدم والرائدات — من 15 إلى 17 سنة)</option>
-                </select>
+                <label className="block text-xs font-bold text-charcoal/80 mb-1">
+                  القسم الكشفي *
+                </label>
+                <div className="relative">
+                  <select
+                    value={selectedSectionId}
+                    onChange={(e) => handleSectionChange(e.target.value)}
+                    disabled={isLoadingSections}
+                    className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
+                  >
+                    {sections.map((sec) => (
+                      <option key={sec.id} value={sec.id}>
+                        {sec.name} {sec.description ? `(${sec.description})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <Layers className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5" />
+                </div>
+              </div>
+
+              {/* Section Year Selection (Cascading Dynamic) */}
+              <div>
+                <label className="block text-xs font-bold text-charcoal/80 mb-1">
+                  السنة الكشفية / المستوى *
+                </label>
+                <div className="relative">
+                  <select
+                    value={selectedYearId}
+                    onChange={(e) => setSelectedYearId(e.target.value)}
+                    disabled={isLoadingSections || currentYears.length === 0}
+                    className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
+                  >
+                    {currentYears.map((yr) => (
+                      <option key={yr.id} value={yr.id}>
+                        {yr.name}
+                      </option>
+                    ))}
+                  </select>
+                  <Calendar className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5" />
+                </div>
               </div>
 
               {/* Commitment Preference */}
@@ -143,7 +226,7 @@ export default function RegisterPage() {
                   className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
                 >
                   <option value="committed">ملتزم بالحضور أسبوعيًا</option>
-                  <option value="circumstances">عندي ظروف ومش هقدر أحضر الجمعة، لكن هكون متفاعل على الجروب</option>
+                  <option value="circumstances">عندي ظروف ولن أستطيع الحضور أسبوعيًا بانتظام</option>
                   <option value="inactive">غير ملتزم حاليًا</option>
                 </select>
                 <p className="text-[11px] text-charcoal/60 mt-1">
@@ -167,7 +250,7 @@ export default function RegisterPage() {
                   <Phone className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5" />
                 </div>
                 <p className="text-[10px] text-charcoal/50 mt-1">
-                  حماية كاملة: أرقام الهواتف لا تظهر لباقي الكشافة في الطليعة إطلاقًا.
+                  حماية كاملة: أرقام الهواتف سرية ولا تظهر لباقي الكشافة في الطليعة.
                 </p>
               </div>
 
@@ -175,10 +258,11 @@ export default function RegisterPage() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
                 <div>
                   <label className="block text-xs font-bold text-charcoal/80 mb-1">
-                    البريد الإلكتروني للحساب
+                    البريد الإلكتروني للحساب *
                   </label>
                   <input
                     type="email"
+                    required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="scout@example.com"
@@ -187,10 +271,11 @@ export default function RegisterPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-charcoal/80 mb-1">
-                    كلمة المرور
+                    كلمة المرور *
                   </label>
                   <input
                     type="password"
+                    required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"

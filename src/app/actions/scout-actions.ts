@@ -4,15 +4,28 @@ import { AppError } from '@/lib/actions/result';
 import {
   requireSession,
   hasRole,
+  SUPER_ADMIN_ROLES,
   ADMIN_ROLES,
+  LEADER_ROLES,
   STAFF_ROLES,
   ANY_ROLE,
 } from '@/lib/auth/auth-service';
 import { registerScoutMember, RegisterInput } from '@/lib/auth/registration';
+import { createAdminClient } from '@/lib/supabase/admin';
 import { ScoutStore } from '@/lib/data/scout-store';
 import {
   listMembers,
   getProfile,
+  updateProfile,
+  listScoutSections,
+  listActiveScoutSections,
+  createScoutSection,
+  updateScoutSection,
+  createSectionYear,
+  updateSectionYear,
+  getStaffScopeAssignments,
+  assignStaffScope,
+  revokeStaffScope,
   getOrCreateMyQr,
   rotateQr,
   verifyQr,
@@ -27,6 +40,8 @@ import {
   listDistributions,
   getDistributionDetail,
   getMyPublishedTeam,
+  getMyStats,
+  getMyBadges,
   DraftTeamInput,
 } from '@/lib/supabase/supabase-service';
 import {
@@ -37,10 +52,13 @@ import type {
   AttendanceRecord,
   DistributionMode,
   Profile,
+  ScoutSection,
+  ScoutSectionYear,
   ScoutStageId,
   Team,
   TeamDistribution,
   UniformStatus,
+  UserRoleType,
   WeeklyResponse,
   WeeklyResponseType,
 } from '@/types';
@@ -51,22 +69,26 @@ import type {
  */
 export async function verifyScoutQRTokenAction(token: string) {
   if (!token) {
-    return { member: null, isRevoked: false, isActive: false };
+    return { member: null, isRevoked: false, isActive: false, isUnauthorizedScope: false };
   }
 
   const ctx = await requireSession(STAFF_ROLES);
 
   if (ctx.mode === 'demo') {
-    return ScoutStore.getMemberByQRToken(token);
+    const demo = ScoutStore.getMemberByQRToken(token);
+    return { ...demo, isUnauthorizedScope: false };
   }
 
   const verification = await verifyQr(ctx.client!, token);
 
+  if (verification.status === 'unauthorized_scope') {
+    return { member: null, isRevoked: false, isActive: false, isUnauthorizedScope: true };
+  }
   if (verification.status === 'revoked') {
-    return { member: null, isRevoked: true, isActive: false };
+    return { member: null, isRevoked: true, isActive: false, isUnauthorizedScope: false };
   }
   if (verification.status !== 'valid' || !verification.member) {
-    return { member: null, isRevoked: false, isActive: false };
+    return { member: null, isRevoked: false, isActive: false, isUnauthorizedScope: false };
   }
 
   const memberProfile: Profile = {
@@ -74,13 +96,15 @@ export async function verifyScoutQRTokenAction(token: string) {
     member_number: verification.member.member_number,
     full_name: verification.member.full_name,
     stage_id: verification.member.stage_id,
+    section_id: verification.member.section_id,
+    year_id: verification.member.year_id,
     initial_commitment: 'committed',
     is_active: true,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 
-  return { member: memberProfile, isRevoked: false, isActive: true };
+  return { member: memberProfile, isRevoked: false, isActive: true, isUnauthorizedScope: false };
 }
 
 /**
@@ -124,6 +148,8 @@ export async function recordAttendanceAction(params: {
       MEMBER_NOT_FOUND: 'لم يتم العثور على سجل الكشاف أو حسابه غير نشط',
       DUPLICATE: 'تم تسجيل حضور هذا الكشاف بالفعل في هذا الاجتماع',
       INVALID_UNIFORM: 'حالة الزي الكشفي غير صالحة',
+      UNAUTHORIZED_SCOPE: 'ليس لديك صلاحية لتسجيل حضور كشاف في قسم خارج نطاق إشرافك المعتمد',
+      SECTION_MISMATCH: 'هذا الكشاف يتبع قسمًا كشفيًا مختلفًا عن قسم جلسة اليوم',
     };
     return {
       success: false,
@@ -393,7 +419,11 @@ export async function swapTeamMembersAction(params: {
     return { success: true, distribution: dist };
   }
 
-  await swapDraftMembers(ctx.client!, params.distributionId, params.memberAId, params.memberBId);
+  await swapDraftMembers(ctx.client!, {
+    distributionId: params.distributionId,
+    memberA: params.memberAId,
+    memberB: params.memberBId,
+  });
   const updated = await getDistributionDetail(ctx.client!, params.distributionId);
   return { success: true, distribution: updated };
 }
@@ -647,3 +677,512 @@ export async function getAdminMembersDataAction() {
   const members = await listMembers(ctx.client!);
   return { members, isLiveSupabase: true };
 }
+
+// ============================================================================
+// DYNAMIC SCOUT SECTIONS & YEARS ACTIONS
+// ============================================================================
+
+/**
+ * Public action: Get active scout sections and their active years (for registration & filters).
+ */
+export async function getActiveScoutSectionsAction() {
+  const ctx = await requireSession(ANY_ROLE).catch(() => null);
+
+  if (!ctx || ctx.mode === 'demo') {
+    return [
+      {
+        id: 'sec-cubs',
+        code: 'cubs',
+        name: 'الأشبال والزهرات',
+        description: 'من سن 7 إلى 11 سنة',
+        icon: 'flame',
+        color_theme: '#EA580C',
+        display_order: 1,
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        years: [
+          { id: 'yr-cubs-1', section_id: 'sec-cubs', name: 'السنة الأولى', display_order: 1, is_active: true, created_at: '', updated_at: '' },
+          { id: 'yr-cubs-2', section_id: 'sec-cubs', name: 'السنة الثانية', display_order: 2, is_active: true, created_at: '', updated_at: '' },
+          { id: 'yr-cubs-3', section_id: 'sec-cubs', name: 'السنة الثالثة', display_order: 3, is_active: true, created_at: '', updated_at: '' },
+        ],
+      },
+      {
+        id: 'sec-scouts',
+        code: 'scouts',
+        name: 'الفتيان والمرشدات',
+        description: 'من سن 12 إلى 14 سنة',
+        icon: 'compass',
+        color_theme: '#23836B',
+        display_order: 2,
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        years: [
+          { id: 'yr-scouts-1', section_id: 'sec-scouts', name: 'السنة الأولى', display_order: 1, is_active: true, created_at: '', updated_at: '' },
+          { id: 'yr-scouts-2', section_id: 'sec-scouts', name: 'السنة الثانية', display_order: 2, is_active: true, created_at: '', updated_at: '' },
+          { id: 'yr-scouts-3', section_id: 'sec-scouts', name: 'السنة الثالثة', display_order: 3, is_active: true, created_at: '', updated_at: '' },
+        ],
+      },
+      {
+        id: 'sec-advanced',
+        code: 'advanced',
+        name: 'المتقدم والرائدات',
+        description: 'من سن 15 إلى 17 سنة',
+        icon: 'award',
+        color_theme: '#1E40AF',
+        display_order: 3,
+        is_active: true,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        years: [
+          { id: 'yr-adv-1', section_id: 'sec-advanced', name: 'السنة الأولى', display_order: 1, is_active: true, created_at: '', updated_at: '' },
+          { id: 'yr-adv-2', section_id: 'sec-advanced', name: 'السنة الثانية', display_order: 2, is_active: true, created_at: '', updated_at: '' },
+        ],
+      },
+    ];
+  }
+
+  return listActiveScoutSections(ctx.client!);
+}
+
+/**
+ * Super Admin: Get all scout sections with all years for management.
+ */
+export async function getScoutSectionsAdminAction() {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+  if (ctx.mode === 'demo') {
+    return getActiveScoutSectionsAction();
+  }
+  return listScoutSections(ctx.client!);
+}
+
+export async function createScoutSectionAction(input: {
+  code: string;
+  name: string;
+  description?: string;
+  icon?: string;
+  color_theme?: string;
+  display_order?: number;
+}) {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+  if (ctx.mode === 'demo') {
+    return { id: 'demo-new-sec', ...input, is_active: true, created_at: '', updated_at: '' };
+  }
+  return createScoutSection(ctx.client!, input);
+}
+
+export async function updateScoutSectionAction(id: string, updates: Partial<ScoutSection>) {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+  if (ctx.mode === 'demo') {
+    return { id, ...updates };
+  }
+  return updateScoutSection(ctx.client!, id, updates);
+}
+
+export async function createSectionYearAction(input: {
+  section_id: string;
+  name: string;
+  display_order?: number;
+}) {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+  if (ctx.mode === 'demo') {
+    return { id: 'demo-new-yr', ...input, is_active: true, created_at: '', updated_at: '' };
+  }
+  return createSectionYear(ctx.client!, input);
+}
+
+export async function updateSectionYearAction(id: string, updates: Partial<ScoutSectionYear>) {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+  if (ctx.mode === 'demo') {
+    return { id, ...updates };
+  }
+  return updateSectionYear(ctx.client!, id, updates);
+}
+
+// ============================================================================
+// SUPER ADMIN: LEADER & STAFF MANAGEMENT ACTIONS
+// ============================================================================
+
+export async function getSuperAdminLeadersAction() {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+
+  if (ctx.mode === 'demo') {
+    return {
+      leaders: [],
+      sections: await getActiveScoutSectionsAction(),
+    };
+  }
+
+  const { data: staffRoles } = await ctx.client!
+    .from('user_roles')
+    .select('user_id, role, created_at, profiles!user_roles_user_id_fkey(*)')
+    .in('role', ['super_admin', 'admin', 'section_leader', 'assistant_leader', 'attendance_leader']);
+
+  const assignments = await getStaffScopeAssignments(ctx.client!);
+  const sections = await listScoutSections(ctx.client!);
+
+  const leaders = (staffRoles ?? []).map((row: any) => {
+    const prof = row.profiles;
+    const userScopes = assignments.filter((a) => a.user_id === row.user_id);
+    return {
+      userId: row.user_id,
+      role: row.role as UserRoleType,
+      roleCreatedAt: row.created_at,
+      profile: prof ? {
+        id: prof.id,
+        member_number: prof.member_number,
+        full_name: prof.full_name,
+        phone: prof.phone,
+        is_active: prof.is_active,
+        avatar_url: prof.avatar_url,
+        created_at: prof.created_at,
+        updated_at: prof.updated_at,
+      } : null,
+      scopes: userScopes,
+    };
+  });
+
+  return { leaders, sections };
+}
+
+export async function createLeaderAccountAction(params: {
+  fullName: string;
+  email: string;
+  password?: string;
+  role: 'section_leader' | 'assistant_leader';
+  sectionId: string;
+  yearId?: string | null;
+}) {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+
+  const trimmedName = params.fullName?.trim();
+  if (!trimmedName || trimmedName.length < 3) {
+    throw new AppError('VALIDATION', 'اسم القائد يجب أن يكون 3 أحرف على الأقل.');
+  }
+
+  const trimmedEmail = params.email?.trim().toLowerCase();
+  if (!trimmedEmail || !trimmedEmail.includes('@')) {
+    throw new AppError('VALIDATION', 'البريد الإلكتروني غير صالح.');
+  }
+
+  if (ctx.mode === 'demo') {
+    return { success: true, message: 'تم إنشاء حساب القائد بنجاح (وضع المعاينة)' };
+  }
+
+  const adminClient = createAdminClient();
+  const password = params.password || 'ScoutLeader2026!';
+
+  // 1. Create Supabase Auth user
+  const { data: authUser, error: authErr } = await adminClient.auth.admin.createUser({
+    email: trimmedEmail,
+    password,
+    email_confirm: true,
+    user_metadata: { full_name: trimmedName },
+  });
+
+  if (authErr || !authUser?.user) {
+    const msg = authErr?.message || '';
+    if (msg.includes('already registered') || msg.includes('unique')) {
+      throw new AppError('CONFLICT', 'هذا البريد الإلكتروني مسجل بالفعل لمستخدم آخر.');
+    }
+    throw new AppError('INTERNAL', 'تعذر إنشاء الحساب الأمني للقائد: ' + msg);
+  }
+
+  const userId = authUser.user.id;
+
+  try {
+    // 2. Generate member number
+    const memberNum = 'LDR-' + new Date().getFullYear() + '-' + Math.floor(1000 + Math.random() * 9000);
+
+    // 3. Create profile
+    const { error: profErr } = await adminClient.from('profiles').insert({
+      id: userId,
+      member_number: memberNum,
+      full_name: trimmedName,
+      section_id: params.sectionId,
+      year_id: params.yearId ?? null,
+      initial_commitment: 'committed',
+      is_active: true,
+    });
+    if (profErr) throw profErr;
+
+    // 4. Assign role in user_roles
+    const { error: roleErr } = await adminClient.from('user_roles').insert({
+      user_id: userId,
+      role: params.role,
+    });
+    if (roleErr) throw roleErr;
+
+    // 5. Create QR credential
+    await adminClient.from('qr_credentials').insert({ member_id: userId });
+
+    // 6. Assign scope assignment
+    await assignStaffScope(ctx.client!, userId, params.sectionId, params.yearId);
+
+    return { success: true, userId, memberNumber: memberNum };
+  } catch (err: any) {
+    // Compensate: delete auth user if profile setup fails
+    try {
+      await adminClient.auth.admin.deleteUser(userId);
+    } catch {}
+    throw new AppError('INTERNAL', 'فشل إعداد بيانات القائد: ' + (err?.message || 'خطأ غير متوقع'));
+  }
+}
+
+export async function assignLeaderScopeAction(params: {
+  userId: string;
+  sectionId: string;
+  yearId?: string | null;
+}) {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+  if (ctx.mode === 'demo') {
+    return { success: true };
+  }
+  await assignStaffScope(ctx.client!, params.userId, params.sectionId, params.yearId);
+  return { success: true };
+}
+
+export async function revokeLeaderScopeAction(assignmentId: string) {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+  if (ctx.mode === 'demo') {
+    return { success: true };
+  }
+  await revokeStaffScope(ctx.client!, assignmentId);
+  return { success: true };
+}
+
+export async function toggleUserActiveAction(userId: string, isActive: boolean) {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+  if (ctx.mode === 'demo') {
+    return { success: true };
+  }
+  const { error } = await ctx.client!
+    .from('profiles')
+    .update({ is_active: isActive, updated_at: new Date().toISOString() })
+    .eq('id', userId);
+  if (error) throw new AppError('INTERNAL', 'تعذر تحديث حالة الحساب');
+  return { success: true };
+}
+
+// ============================================================================
+// MEMBER PROFILE ACTIONS
+// ============================================================================
+
+export async function getMyProfileAction() {
+  const ctx = await requireSession(ANY_ROLE);
+
+  if (ctx.mode === 'demo') {
+    const member = ScoutStore.getAllMembers()[0];
+    const team = ScoutStore.getCurrentPublishedDistribution()?.teams?.[0] || null;
+    return {
+      profile: member,
+      qrToken: 'demo-qr-token',
+      stats: { attended: 8, withUniform: 8, late: 1 },
+      badges: [],
+      activeTeam: team,
+      isLiveSupabase: false,
+    };
+  }
+
+  const profile = await getProfile(ctx.client!, ctx.userId);
+  if (!profile) {
+    throw new AppError('NOT_FOUND', 'ملف العضو غير موجود');
+  }
+
+  const qrToken = await getOrCreateMyQr(ctx.client!);
+  const stats = await getMyStats(ctx.client!, ctx.userId);
+  const badges = await getMyBadges(ctx.client!, ctx.userId);
+  const activeTeam = await getMyPublishedTeam(ctx.client!);
+
+  return {
+    profile,
+    qrToken,
+    stats,
+    badges,
+    activeTeam,
+    isLiveSupabase: true,
+  };
+}
+
+export async function updateMyProfileAction(updates: { full_name?: string; phone?: string; avatar_url?: string }) {
+  const ctx = await requireSession(ANY_ROLE);
+
+  if (ctx.mode === 'demo') {
+    return { success: true };
+  }
+
+  const safeUpdates: { full_name?: string; phone?: string; avatar_url?: string } = {};
+  if (updates.full_name) {
+    const trimmed = updates.full_name.trim();
+    if (trimmed.length < 3) throw new AppError('VALIDATION', 'الاسم يجب ألا يقل عن 3 أحرف');
+    safeUpdates.full_name = trimmed;
+  }
+  if (updates.phone !== undefined) {
+    safeUpdates.phone = updates.phone?.trim() || null as any;
+  }
+  if (updates.avatar_url !== undefined) {
+    safeUpdates.avatar_url = updates.avatar_url;
+  }
+
+  const updated = await updateProfile(ctx.client!, ctx.userId, safeUpdates);
+  return { success: true, profile: updated };
+}
+
+// ============================================================================
+// LEADER DASHBOARD & SCOPE ACTIONS
+// ============================================================================
+
+export async function getLeaderDashboardDataAction(selectedSectionId?: string, selectedYearId?: string) {
+  const ctx = await requireSession(LEADER_ROLES);
+
+  if (ctx.mode === 'demo') {
+    const all = ScoutStore.getAllMembers();
+    const activeSession = ScoutStore.getActiveFridaySession();
+    return {
+      scopes: [],
+      allSections: await getActiveScoutSectionsAction(),
+      activeSession,
+      members: all,
+      attendanceCount: 12,
+      isLiveSupabase: false,
+    };
+  }
+
+  const userScopes = await getStaffScopeAssignments(ctx.client!, ctx.userId);
+  const isSuper = ctx.roles.includes('super_admin') || ctx.roles.includes('admin');
+
+  // Load sessions
+  const sessions = await listSessions(ctx.client!, selectedSectionId);
+  const activeSession = sessions.find((s) => s.is_open_for_attendance) || sessions[0] || null;
+
+  // Filter members under RLS (RLS already scopes listMembers!)
+  let members = await listMembers(ctx.client!);
+  if (selectedSectionId) {
+    members = members.filter((m) => m.section_id === selectedSectionId);
+  }
+  if (selectedYearId) {
+    members = members.filter((m) => m.year_id === selectedYearId);
+  }
+
+  let attendanceCount = 0;
+  if (activeSession) {
+    const records = await listAttendance(ctx.client!, activeSession.id);
+    attendanceCount = records.length;
+  }
+
+  const allSections = await listActiveScoutSections(ctx.client!);
+
+  return {
+    scopes: userScopes,
+    isSuper,
+    allSections,
+    activeSession,
+    members,
+    attendanceCount,
+    isLiveSupabase: true,
+  };
+}
+
+export async function getLeaderMembersAction(selectedSectionId?: string, selectedYearId?: string) {
+  const ctx = await requireSession(LEADER_ROLES);
+
+  if (ctx.mode === 'demo') {
+    return { members: ScoutStore.getAllMembers(), isLiveSupabase: false };
+  }
+
+  let members = await listMembers(ctx.client!);
+  if (selectedSectionId) {
+    members = members.filter((m) => m.section_id === selectedSectionId);
+  }
+  if (selectedYearId) {
+    members = members.filter((m) => m.year_id === selectedYearId);
+  }
+
+  return { members, isLiveSupabase: true };
+}
+
+export async function getLeaderReportsDataAction(selectedSectionId?: string, sessionId?: string) {
+  const ctx = await requireSession(LEADER_ROLES);
+
+  if (ctx.mode === 'demo') {
+    return getAdminReportsDataAction(sessionId);
+  }
+
+  const sessions = await listSessions(ctx.client!, selectedSectionId);
+  const targetId = sessionId || sessions[0]?.id || '';
+  const records = targetId ? await listAttendance(ctx.client!, targetId) : [];
+
+  return {
+    sessions,
+    records,
+    selectedSessionId: targetId,
+    isLiveSupabase: true,
+  };
+}
+
+export async function getLeaderScannerDataAction(selectedSectionId?: string) {
+  const ctx = await requireSession(STAFF_ROLES);
+
+  if (ctx.mode === 'demo') {
+    return getAdminScannerDataAction();
+  }
+
+  const sessions = await listSessions(ctx.client!, selectedSectionId);
+  const activeSession = sessions.find((s) => s.is_open_for_attendance) || sessions[0] || null;
+  let members = await listMembers(ctx.client!);
+  if (selectedSectionId) {
+    members = members.filter((m) => m.section_id === selectedSectionId);
+  }
+
+  let count = 0;
+  if (activeSession) {
+    const records = await listAttendance(ctx.client!, activeSession.id);
+    count = records.length;
+  }
+
+  return {
+    activeSession,
+    allMembers: members,
+    attendanceCount: count,
+    isLiveSupabase: true,
+  };
+}
+
+// ============================================================================
+// SUPER ADMIN OVERVIEW ACTION
+// ============================================================================
+
+export async function getSuperAdminOverviewAction() {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+
+  if (ctx.mode === 'demo') {
+    return {
+      totalMembers: 60,
+      totalLeaders: 4,
+      totalSections: 3,
+      totalSessions: 5,
+      recentAuditLogs: [],
+    };
+  }
+
+  const members = await listMembers(ctx.client!);
+  const sections = await listScoutSections(ctx.client!);
+  const sessions = await listSessions(ctx.client!);
+  const leaders = await getStaffScopeAssignments(ctx.client!);
+
+  const { data: auditLogs } = await ctx.client!
+    .from('audit_logs')
+    .select('*, profiles(full_name)')
+    .order('created_at', { ascending: false })
+    .limit(10);
+
+  return {
+    totalMembers: members.length,
+    totalLeaders: new Set(leaders.map((l) => l.user_id)).size,
+    totalSections: sections.length,
+    totalSessions: sessions.length,
+    recentAuditLogs: auditLogs ?? [],
+  };
+}
+

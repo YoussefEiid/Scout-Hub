@@ -6,7 +6,9 @@ import type { CommitmentPreference, ScoutStageId } from '@/types';
 
 export interface RegisterInput {
   fullName: string;
-  stageId: ScoutStageId;
+  stageId?: ScoutStageId;
+  sectionId?: string;
+  yearId?: string;
   commitment: CommitmentPreference;
   phone?: string;
   email?: string;
@@ -18,6 +20,8 @@ export interface RegisterOutput {
   member_number: string;
   full_name: string;
   stage_id: ScoutStageId;
+  section_id?: string | null;
+  year_id?: string | null;
   initial_commitment: CommitmentPreference;
   is_active: boolean;
   created_at: string;
@@ -28,8 +32,8 @@ export interface RegisterOutput {
  *
  * In Supabase mode:
  * 1. Creates an auth user with the service role client.
- * 2. Calls the SECURITY DEFINER RPC `register_member_profile` which creates the profile,
- *    assigns the 'member' role, and seeds a QR credential in a single database transaction.
+ * 2. Calls the SECURITY DEFINER RPC `register_member_profile_v2` (or legacy `register_member_profile`),
+ *    which creates the profile, assigns the 'member' role, and seeds a QR credential in a single database transaction.
  * 3. If step 2 fails for any reason, the auth user is immediately deleted (compensating action)
  *    so no orphaned auth records remain in the system.
  *
@@ -45,14 +49,17 @@ export async function registerScoutMember(input: RegisterInput): Promise<Registe
     throw new AppError('VALIDATION', 'الاسم الكامل يجب ألا يتجاوز 100 حرف.');
   }
 
-  const validStages: ScoutStageId[] = ['stage_1', 'stage_2', 'stage_3'];
-  if (!validStages.includes(input.stageId)) {
-    throw new AppError('VALIDATION', 'المرحلة الكشفية المحددة غير صالحة.');
-  }
-
   const validCommitments: CommitmentPreference[] = ['committed', 'inactive', 'circumstances'];
   if (!validCommitments.includes(input.commitment)) {
     throw new AppError('VALIDATION', 'درجة الالتزام المحددة غير صالحة.');
+  }
+
+  // Validate either dynamic section+year or legacy stageId
+  const hasDynamicScope = Boolean(input.sectionId && input.yearId);
+  const stageId = input.stageId || 'stage_1';
+
+  if (!hasDynamicScope && !input.stageId) {
+    throw new AppError('VALIDATION', 'يجب اختيار القسم الكشفي والسنة الدراسية.');
   }
 
   const mode = getBackendMode();
@@ -64,7 +71,7 @@ export async function registerScoutMember(input: RegisterInput): Promise<Registe
   if (mode === 'demo') {
     const demoProfile = ScoutStore.registerNewMember({
       fullName: trimmedName,
-      stageId: input.stageId,
+      stageId,
       commitment: input.commitment,
       phone: input.phone,
     });
@@ -73,6 +80,8 @@ export async function registerScoutMember(input: RegisterInput): Promise<Registe
       member_number: demoProfile.member_number,
       full_name: demoProfile.full_name,
       stage_id: demoProfile.stage_id,
+      section_id: input.sectionId ?? null,
+      year_id: input.yearId ?? null,
       initial_commitment: demoProfile.initial_commitment,
       is_active: demoProfile.is_active,
       created_at: demoProfile.created_at,
@@ -111,23 +120,38 @@ export async function registerScoutMember(input: RegisterInput): Promise<Registe
 
   // 2. Call transactional registration RPC
   try {
-    const { data: memberNumber, error: rpcErr } = await adminClient.rpc('register_member_profile', {
-      p_user_id: userId,
-      p_full_name: trimmedName,
-      p_phone: input.phone?.trim() || null,
-      p_stage_id: input.stageId,
-      p_commitment: input.commitment,
-    });
+    let memberNumber: string;
 
-    if (rpcErr) {
-      throw mapDbError(rpcErr);
+    if (hasDynamicScope) {
+      const { data, error: rpcErr } = await adminClient.rpc('register_member_profile_v2', {
+        p_user_id: userId,
+        p_full_name: trimmedName,
+        p_phone: input.phone?.trim() || null,
+        p_section_id: input.sectionId,
+        p_year_id: input.yearId,
+        p_commitment: input.commitment,
+      });
+      if (rpcErr) throw mapDbError(rpcErr);
+      memberNumber = data as string;
+    } else {
+      const { data, error: rpcErr } = await adminClient.rpc('register_member_profile', {
+        p_user_id: userId,
+        p_full_name: trimmedName,
+        p_phone: input.phone?.trim() || null,
+        p_stage_id: stageId,
+        p_commitment: input.commitment,
+      });
+      if (rpcErr) throw mapDbError(rpcErr);
+      memberNumber = data as string;
     }
 
     return {
       id: userId,
-      member_number: memberNumber as string,
+      member_number: memberNumber,
       full_name: trimmedName,
-      stage_id: input.stageId,
+      stage_id: stageId,
+      section_id: input.sectionId ?? null,
+      year_id: input.yearId ?? null,
       initial_commitment: input.commitment,
       is_active: true,
       created_at: new Date().toISOString(),

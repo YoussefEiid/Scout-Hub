@@ -26,6 +26,7 @@ interface QRScannerViewProps {
     member: Profile | null;
     isRevoked: boolean;
     isActive: boolean;
+    isUnauthorizedScope?: boolean;
   }>;
   onRecordAttendance: (params: {
     sessionId: string;
@@ -70,6 +71,13 @@ export function QRScannerView({
     try {
       setScanMessage(null);
       const res = await onVerifyToken(token);
+      if (res.isUnauthorizedScope) {
+        setScanMessage({
+          type: 'error',
+          text: '⛔ غير مصرح: هذا الكشاف يتبع قسماً أو سنة خارج نطاق إشرافك المعتمد!',
+        });
+        return;
+      }
       if (res.isRevoked) {
         setScanMessage({
           type: 'error',
