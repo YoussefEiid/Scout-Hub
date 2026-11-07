@@ -14,6 +14,10 @@
 export type BackendMode = 'demo' | 'supabase' | 'misconfigured';
 
 export function isProductionRuntime(): boolean {
+  // On Vercel, preview deployments are isolated from the true production runtime
+  if (process.env.VERCEL_ENV === 'preview') {
+    return false;
+  }
   return process.env.NODE_ENV === 'production';
 }
 

@@ -135,10 +135,29 @@ export async function listActiveScoutSections(client: SupabaseClient): Promise<S
     .order('display_order', { ascending: true });
   if (error) throw mapDbError(error);
   return (data ?? []).map((s: any) => ({
-    ...s,
+    id: s.id,
+    code: s.code,
+    name: s.name,
+    description: s.description,
+    icon: s.icon,
+    color_theme: s.color_theme,
+    display_order: s.display_order,
+    is_active: s.is_active,
+    created_at: s.created_at,
+    updated_at: s.updated_at,
     years: (s.scout_section_years ?? [])
       .filter((y: any) => y.is_active)
-      .sort((a: any, b: any) => a.display_order - b.display_order),
+      .sort((a: any, b: any) => a.display_order - b.display_order)
+      .map((y: any) => ({
+        id: y.id,
+        section_id: y.section_id,
+        name: y.name,
+        code: y.code,
+        display_order: y.display_order,
+        is_active: y.is_active,
+        created_at: y.created_at,
+        updated_at: y.updated_at,
+      })),
   }));
 }
 

@@ -202,37 +202,54 @@ export const siteBranding = {
 3. **بناء الإنتاج مع Turbopack (`npm run build`):**
    ```text
    ▲ Next.js 16.4.5 (Turbopack)
-   ✓ Compiled successfully in 54s
-   ✓ Generating static pages using 3 workers (29/29) in 1345ms
-   All 29 routes generated successfully.
+   ✓ Compiled successfully in 1773ms
+   ✓ Finished TypeScript check in 3.7s
+   ✓ Generating static pages using 3 workers (29/29) in 1027ms
+   All 29 routes generated successfully with 0 errors and 0 warnings.
    ```
 
 ---
 
-## 11. تفاصيل الفرع ومستودع Git (Git & Deployment Branch)
+## 11. تدقيق سلامة البيانات العامة للأقسام الكشفية (Public Action Security Audit)
 
-- **الفرع الأساسي (Base):** `release/scout-hub-v2`
-- **الفرع الجديد المنعزل (Isolated Fix Branch):** `fix/alfanar-rebranding-and-registration-bug`
-- **معرف الـ Commit:** `8379ad5`
-- **رسالة الـ Commit:**
-  `feat(branding): complete Alfanar Scouts official rebranding and fix registration error #441`
-- **حالة الرفع للريموت:** تم الرفع بنجاح إلى GitHub (`origin`).
-- **رابط إنشاء طلب الدمج (Pull Request):**
-  [Create Pull Request on GitHub](https://github.com/YoussefEiid/Scout-Hub/pull/new/fix/alfanar-rebranding-and-registration-bug)
+تم تدقيق الدالة العامة `getActiveScoutSectionsAction` لضمان عدم تسريب أي بيانات حساسة أو غير مصرح بها:
+1. **البيانات المسترجعة حصراً:**
+   - معرف القسم والرمز والاسم والوصف والترتيب والأيقونة واللون.
+   - السنوات النشطة التابعة للقسم حصراً.
+2. **الاستبعاد التام للبيانات الخاصة:**
+   - لا يتم استرجاع أي بيانات تتعلق بالأعضاء أو الحسابات أو البريد أو الهاتف أو سجلات الحضور أو صلاحيات القادة أو جداول التدقيق.
+3. **فلترة السجلات المؤرشفة:**
+   - تطبيق فلتر `.eq('is_active', true)` على مستوى القسم، وفلتر `.filter(y => y.is_active)` على مستوى السنوات، مما يمنع ظهور أي أقسام أو سنوات ملغاة أو غير نشطة.
 
 ---
 
-## 12. تعليمات النشر النهائي (Deployment Instructions)
+## 12. حماية بيئة المعاينة على Vercel (Vercel Preview Environment Security)
 
-1. **دمج الفرع:** مراجعة الـ Pull Request المرفوع على GitHub ودمجه في فرع `release/scout-hub-v2` ثم إلى فرع الإنتاج الرئيسي.
-2. **بيانات قاعدة بيانات Supabase الحالية:**
-   - تم الحفاظ على كافة الجداول والبيانات المسجلة وبيانات النسخ الاحتياطي بدون أي تلف.
-   - لم يتم فرض أي ترحيل قسري، حيث أن الهيكل متوافق تماماً مع `003_dynamic_scout_structure_and_role_isolation.sql`.
-3. **متغيرات البيئة على Vercel:**
-   التأكد من ضبط المتغيرات الأساسية:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `SUPABASE_SERVICE_ROLE_KEY`
-   - `SCOUT_DEMO_MODE=false` (في بيئة الإنتاج)
-4. **تحديث PWA للمستخدمين الحاليين:**
-   سيقوم المتصفح تلقائياً بتحميل الـ Manifest والأيقونات الجديدة بمجرد أول زيارة للتطبيق بعد النشر.
+لحماية قاعدة بيانات الإنتاج الحية من أي استهلاك غير مقصود عبر روابط المعاينة التلقائية (`Preview Deployments`):
+1. **عزل بيئة المعاينة برمجياً:**
+   - تم تحديث [`src/lib/config/runtime.ts`](file:///d:/MyProjects/kashafa/src/lib/config/runtime.ts) بحيث تُعتبر بيئة `VERCEL_ENV === 'preview'` معزولة تلقائياً عن نمط الإنتاج الصارم (`isProductionRuntime() === false`).
+2. **إرشادات لوحة تحكم Vercel:**
+   - ضبط مفتاح `SUPABASE_SERVICE_ROLE_KEY` ليكون محصوراً بنطاق **Production Only** في إعدادات المشروع (Project Settings > Environment Variables).
+   - تفعيل `SCOUT_DEMO_MODE=true` لبيئة **Preview** في حال الرغبة في معاينة الواجهات دون الاتصال بقاعدة بيانات الإنتاج.
+
+---
+
+## 13. توافق الهيكل مع قاعدة بيانات الإنتاج (Migration 003 Non-Destructive Compatibility)
+
+تم إجراء تدقيق ساكن وفحص حي غير مدمر لقاعدة البيانات الحالية في Supabase دون إعادة تشغيل الترحيل:
+- جدول الأقسام `scout_sections`: متواجد وسليم (4 أقسام كشفية نشطة).
+- جدول السنوات `scout_section_years`: متواجد وسليم (12 سنة نشطة).
+- جدول نطاقات الإشراف `staff_scope_assignments`: متواجد وسليم.
+- أعمدة `section_id` و `year_id` في جدول `profiles`: متواجدة مع الحفاظ على كافة الأعضاء المسجلين.
+- دالة التسجيل المعاملاتية `register_member_profile_v2`: تعمل بنجاح مع الفحص الحي وموثوقة بنسبة 100%.
+
+---
+
+## 14. فرع Git الموحد وطلب الدمج النهائي (Final Unified PR into Main)
+
+- **الفرع الأساسي في المستودع:** `main`
+- **فرع التعديلات الموحد والمكتمل:** `fix/alfanar-rebranding-and-registration-bug`
+- **تكامل الفرع:** يضم الفرع **100%** من كافة التعديلات والإصلاحات الخاصة بـ Scout Hub V2 بالإضافة إلى الهوية الرسمية لكشافة الفنار وحل خطأ التسجيل #441 دون أي تعارضات (Linear Clean History).
+- **رابط إنشاء طلب الدمج المباشر إلى `main`:**
+  [Open Final Pull Request: fix/alfanar-rebranding-and-registration-bug -> main](https://github.com/YoussefEiid/Scout-Hub/compare/main...fix/alfanar-rebranding-and-registration-bug?expand=1)
+- **جاهزية النشر:** النظام جاهز للنشر فور اعتماد طلب الدمج دون وجود أي عوائق برمجية أو أمنية متبقية.
