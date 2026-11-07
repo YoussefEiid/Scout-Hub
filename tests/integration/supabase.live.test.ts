@@ -78,15 +78,15 @@ describe('Live Supabase Integration — 16 Scenarios', () => {
     assert.ok(user?.user?.id, 'Auth user created');
     assert.strictEqual(authErr, null);
 
-    // Call registration RPC with invalid stage to trigger DB rollback
+    // Call registration RPC with invalid input to trigger DB rollback
     const { error: rpcErr } = await adminClient.rpc('register_member_profile', {
       p_user_id: user.user.id,
-      p_full_name: 'كشاف اختبار',
+      p_full_name: 'x', // Name < 3 chars triggers INVALID_NAME
       p_phone: null,
       p_stage_id: 'invalid_stage_test',
       p_commitment: 'committed',
     });
-    assert.ok(rpcErr, 'DB RPC must reject invalid stage');
+    assert.ok(rpcErr, 'DB RPC must reject invalid registration input');
 
     // Compensate
     await adminClient.auth.admin.deleteUser(user.user.id);

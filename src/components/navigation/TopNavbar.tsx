@@ -2,7 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import { siteBranding } from '@/config/branding';
 import {
   Compass,
   User,
@@ -80,12 +82,23 @@ export function TopNavbar({ currentRole: initialRole, userName: initialUserName 
       <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
         {/* Brand Logo & Name */}
         <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="w-10 h-10 rounded-xl bg-orange flex items-center justify-center text-white shadow-sm transition-transform group-hover:scale-105">
-            <Compass className="w-6 h-6 animate-pulse" />
+          <div className="w-10 h-10 rounded-full overflow-hidden bg-forest-hover flex items-center justify-center border border-sand/40 shadow-sm transition-transform group-hover:scale-105 shrink-0">
+            <Image
+              src={siteBranding.logoUrl}
+              alt={siteBranding.nameAr}
+              width={40}
+              height={40}
+              className="w-full h-full object-cover"
+              priority
+            />
           </div>
-          <div className="flex flex-col">
-            <span className="text-lg font-black tracking-wide text-sand-light font-cairo">كشافة هب</span>
-            <span className="text-[10px] text-cream/70 -mt-1">منصة المغامرة الكشفية</span>
+          <div className="flex flex-col min-w-0">
+            <span className="text-sm sm:text-lg font-black tracking-wide text-sand-light font-cairo truncate">
+              {siteBranding.nameAr}
+            </span>
+            <span className="text-[9px] sm:text-[10px] text-cream/75 -mt-0.5 font-medium truncate max-w-[110px] sm:max-w-none hidden xs:inline-block">
+              {siteBranding.groupNameAr}
+            </span>
           </div>
         </Link>
 
@@ -235,7 +248,7 @@ export function TopNavbar({ currentRole: initialRole, userName: initialUserName 
                 className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-forest-hover/80 border border-sand/20 text-xs hover:border-sand transition-all"
               >
                 <span className="w-2 h-2 rounded-full bg-emerald-light animate-ping" />
-                <span className="font-bold text-sand-light truncate max-w-[120px]">{name || 'مستخدم'}</span>
+                <span className="font-bold text-sand-light truncate max-w-[70px] sm:max-w-[120px]">{name || 'مستخدم'}</span>
                 {isSuperAdmin ? (
                   <span className="text-[10px] bg-red-600 text-white px-1.5 py-0.5 rounded-full font-bold">
                     قائد عام

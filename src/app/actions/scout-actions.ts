@@ -12,6 +12,7 @@ import {
 } from '@/lib/auth/auth-service';
 import { registerScoutMember, RegisterInput } from '@/lib/auth/registration';
 import { createAdminClient } from '@/lib/supabase/admin';
+import { getBackendMode } from '@/lib/config/runtime';
 import { ScoutStore } from '@/lib/data/scout-store';
 import {
   listMembers,
@@ -686,9 +687,9 @@ export async function getAdminMembersDataAction() {
  * Public action: Get active scout sections and their active years (for registration & filters).
  */
 export async function getActiveScoutSectionsAction() {
-  const ctx = await requireSession(ANY_ROLE).catch(() => null);
+  const mode = getBackendMode();
 
-  if (!ctx || ctx.mode === 'demo') {
+  if (mode === 'demo') {
     return [
       {
         id: 'sec-cubs',
@@ -743,7 +744,9 @@ export async function getActiveScoutSectionsAction() {
     ];
   }
 
-  return listActiveScoutSections(ctx.client!);
+  // Live Supabase mode: load active sections and years securely via service client
+  const admin = createAdminClient();
+  return listActiveScoutSections(admin);
 }
 
 /**

@@ -1,13 +1,14 @@
 import { MetadataRoute } from 'next';
+import { siteBranding } from '@/config/branding';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'كشافة هب - المنصة الكشفية الذكية',
-    short_name: 'كشافة هب',
-    description: 'إدارة المجموعات الكشفية، بطاقات الهوية الذكية، حضور الجمعة بالـ QR وتوزيع الفرق',
+    name: siteBranding.nameAr,
+    short_name: siteBranding.shortName,
+    description: `${siteBranding.fullTitleAr} - ${siteBranding.descriptionAr}`,
     start_url: '/',
     display: 'standalone',
-    background_color: '#FCF9F2',
+    background_color: '#FDFBF7',
     theme_color: '#173C32',
     dir: 'rtl',
     lang: 'ar',

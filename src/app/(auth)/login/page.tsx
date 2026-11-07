@@ -2,11 +2,13 @@
 
 import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Compass, User, Lock, AlertCircle, ArrowLeft, Sparkles, ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { createClient } from '@/lib/supabase/client';
+import { siteBranding } from '@/config/branding';
 
 function LoginFormContent() {
   const router = useRouter();
@@ -97,12 +99,20 @@ function LoginFormContent() {
     <div className="min-h-screen bg-cream flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-6">
         <Link href="/" className="inline-flex items-center gap-2 group mb-3">
-          <div className="w-12 h-12 rounded-2xl bg-forest text-sand-light flex items-center justify-center shadow-md">
-            <Compass className="w-7 h-7 text-orange" />
+          <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-forest shadow-md bg-forest-hover flex items-center justify-center mx-auto transition-transform group-hover:scale-105">
+            <Image
+              src={siteBranding.logoUrl}
+              alt={siteBranding.nameAr}
+              width={64}
+              height={64}
+              className="w-full h-full object-cover"
+              priority
+            />
           </div>
         </Link>
-        <h2 className="text-2xl font-black text-forest">تسجيل دخول الكشافة والقادة 🏕️</h2>
-        <p className="text-xs text-charcoal/70 mt-1">ادخل إلى لوحتك لمتابعة طليعتك وبطاقتك وحضورك</p>
+        <h2 className="text-2xl font-black text-forest">{siteBranding.nameAr} 🏕️</h2>
+        <p className="text-xs text-charcoal/70 mt-1">{siteBranding.churchInscription}</p>
+        <p className="text-[11px] text-charcoal/50 mt-0.5">تسجيل الدخول إلى البوابة الرقمية</p>
 
         {isLiveSupabase ? (
           <div className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald/10 border border-emerald/30 text-emerald-dark text-[11px] font-bold">
@@ -137,7 +147,7 @@ function LoginFormContent() {
                   required
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
-                  placeholder="leader@scouthub.org"
+                  placeholder="user@alfanar-scouts.com"
                   className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
                 />
                 <User className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5" />

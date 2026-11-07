@@ -81,7 +81,7 @@ export default async function SuperAdminOverviewPage() {
               <ShieldCheck className="w-3.5 h-3.5 text-red-400" />
               <span>لوحة الإدارة العامة — Super Admin Dashboard</span>
             </div>
-            <h1 className="text-2xl md:text-3xl font-black text-sand-light">التحكم المركزي بفوج كشافة هب 🏕️</h1>
+            <h1 className="text-2xl md:text-3xl font-black text-sand-light">التحكم المركزي بكشافة الفنار 🏕️</h1>
             <p className="text-xs md:text-sm text-cream/75 mt-1 max-w-2xl">
               إدارة الهيكل الكشفي الديناميكي، تكليف القادة بنطاقات إشراف محددة، والرقابة الشاملة على الحضور والفرق.
             </p>

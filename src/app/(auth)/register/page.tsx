@@ -2,11 +2,13 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Compass, User, Phone, CheckCircle2, AlertCircle, ArrowLeft, Layers, Calendar } from 'lucide-react';
+import Image from 'next/image';
+import { User, Phone, CheckCircle2, AlertCircle, ArrowLeft, Layers, Calendar } from 'lucide-react';
 import { CommitmentPreference, ScoutSection } from '@/types';
 import { registerMemberAction, getActiveScoutSectionsAction } from '@/app/actions/scout-actions';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
+import { siteBranding } from '@/config/branding';
 
 export default function RegisterPage() {
   const [fullName, setFullName] = useState('');
@@ -27,12 +29,14 @@ export default function RegisterPage() {
     async function loadSections() {
       try {
         const data = await getActiveScoutSectionsAction();
-        setSections(data);
-        if (data.length > 0) {
+        setSections(data || []);
+        if (data && data.length > 0) {
           const firstSection = data[0];
           setSelectedSectionId(firstSection.id);
           if (firstSection.years && firstSection.years.length > 0) {
             setSelectedYearId(firstSection.years[0].id);
+          } else {
+            setSelectedYearId('');
           }
         }
       } catch (err) {
@@ -76,6 +80,12 @@ export default function RegisterPage() {
       return;
     }
 
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError('يرجى إدخال بريد إلكتروني صالح');
+      return;
+    }
+
     if (password.length < 6) {
       setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
       return;
@@ -100,7 +110,17 @@ export default function RegisterPage() {
 
       setSuccessMemberNumber(profile.member_number);
     } catch (err: any) {
-      setError(err?.message || 'حدث خطأ أثناء التسجيل. يرجى المحاولة مرة أخرى.');
+      const msg = err?.message || '';
+      if (
+        msg.includes('441') ||
+        msg.includes('Server Components') ||
+        msg.includes('digest') ||
+        msg.includes('Minified React error')
+      ) {
+        setError('تعذر إتمام التسجيل بسبب خطأ مؤقت في الخادم. يرجى مراجعة البيانات والمحاولة لاحقًا.');
+      } else {
+        setError(msg || 'حدث خطأ أثناء التسجيل. يرجى المحاولة مرة أخرى.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -110,12 +130,20 @@ export default function RegisterPage() {
     <div className="min-h-screen bg-cream flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-6">
         <Link href="/" className="inline-flex items-center gap-2 group mb-3">
-          <div className="w-12 h-12 rounded-2xl bg-forest text-sand-light flex items-center justify-center shadow-md">
-            <Compass className="w-7 h-7 text-orange" />
+          <div className="w-16 h-16 rounded-full overflow-hidden border-2 border-forest shadow-md bg-forest-hover flex items-center justify-center mx-auto transition-transform group-hover:scale-105">
+            <Image
+              src={siteBranding.logoUrl}
+              alt={siteBranding.nameAr}
+              width={64}
+              height={64}
+              className="w-full h-full object-cover"
+              priority
+            />
           </div>
         </Link>
-        <h2 className="text-2xl font-black text-forest">انضم إلى كشافة هب 🏕️</h2>
-        <p className="text-xs text-charcoal/70 mt-1">سجل بياناتك الكشفية واحصل على بطاقتك الرقمية فورًا</p>
+        <h2 className="text-2xl font-black text-forest">انضم إلى {siteBranding.nameAr} 🏕️</h2>
+        <p className="text-xs text-charcoal/70 mt-1">{siteBranding.churchInscription}</p>
+        <p className="text-[11px] text-charcoal/50 mt-0.5">سجل بياناتك الكشفية واحصل على بطاقتك الرقمية فورًا</p>
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
@@ -126,8 +154,8 @@ export default function RegisterPage() {
                 <CheckCircle2 className="w-10 h-10" />
               </div>
               <div>
-                <h3 className="text-xl font-bold text-forest">أهلاً بك في الفوج الكشفي! 🏕️</h3>
-                <p className="text-xs text-charcoal/70 mt-1">تم إنشاء ملفك وبطاقتك الكشفية بنجاح</p>
+                <h3 className="text-xl font-bold text-forest">أهلاً بك في {siteBranding.nameAr}! 🏕️</h3>
+                <p className="text-xs text-charcoal/70 mt-1">تم إنشاء ملفك وبطاقتك الكشفية بنجاح في {siteBranding.groupNameAr}</p>
               </div>
 
               <div className="p-4 rounded-2xl bg-sand/30 border border-sand">

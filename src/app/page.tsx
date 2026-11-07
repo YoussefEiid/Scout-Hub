@@ -1,5 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   Compass,
   QrCode,
@@ -19,6 +20,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { getCurrentSession, getDefaultRedirectForRole } from '@/lib/auth/auth-service';
 import { isDemoModeEnabled } from '@/lib/config/runtime';
+import { siteBranding } from '@/config/branding';
 
 export const instant = false;
 
@@ -40,48 +42,69 @@ export default async function HomePage() {
   const dashboardHref = session ? getDefaultRedirectForRole(session.roles) : '/dashboard';
 
   return (
-    <div className="min-h-screen flex flex-col bg-cream text-charcoal">
+    <div className="min-h-screen flex flex-col bg-cream text-charcoal overflow-x-hidden">
       <TopNavbar currentRole={userRole} userName={userName} />
 
       <main className="flex-1 pb-20 md:pb-12">
         {/* Hero Section */}
-        <section className="relative overflow-hidden bg-gradient-to-b from-forest via-forest to-emerald-dark text-cream pt-12 pb-20 px-4 sm:px-6">
+        <section className="relative overflow-hidden bg-gradient-to-b from-forest via-forest to-emerald-dark text-cream pt-10 pb-16 px-4 sm:px-6">
           {/* Ambient Glow Accents */}
           <div className="absolute top-0 right-1/4 w-96 h-96 bg-orange/15 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute bottom-0 left-10 w-80 h-80 bg-emerald/20 rounded-full blur-3xl pointer-events-none" />
 
-          <div className="max-w-4xl mx-auto text-center relative z-10 space-y-6">
+          <div className="max-w-4xl mx-auto text-center relative z-10 space-y-5">
+            {/* Church & Group Official Banner */}
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/10 border border-sand/30 text-sand-light text-[11px] sm:text-xs font-bold backdrop-blur-md max-w-full">
+              <span className="truncate">{siteBranding.churchInscription}</span>
+            </div>
+
+            {/* Official Circular Logo Emblem */}
+            <div className="flex justify-center pt-1">
+              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-full overflow-hidden border-2 border-sand/40 shadow-xl bg-forest-hover relative">
+                <Image
+                  src={siteBranding.logoUrl}
+                  alt={siteBranding.logoAlt}
+                  width={112}
+                  height={112}
+                  className="w-full h-full object-cover"
+                  priority
+                />
+              </div>
+            </div>
+
             {isLoggedIn ? (
               <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald/20 border border-emerald/40 text-sand-light text-xs sm:text-sm font-bold backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-500">
-                <ShieldCheck className="w-4 h-4 text-emerald-light" />
-                <span>
-                  مرحباً بك مجدداً، {userName} (
+                <ShieldCheck className="w-4 h-4 text-emerald-light shrink-0" />
+                <span className="truncate">
+                  مرحباً بك، {userName} (
                   {isSuperAdmin ? 'القائد العام' : isLeader ? 'قائد مرحلة كشفية' : 'كشاف'})
                 </span>
               </div>
             ) : (
               <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-orange/20 border border-orange/40 text-sand-light text-xs sm:text-sm font-bold backdrop-blur-md animate-in fade-in slide-in-from-top-4 duration-500">
-                <Flame className="w-4 h-4 text-orange fill-orange" />
-                <span>جاهز لمغامرة كشفية جديدة؟</span>
+                <Flame className="w-4 h-4 text-orange fill-orange shrink-0" />
+                <span>مستعد للمغامرة الكشفية معنا؟</span>
               </div>
             )}
 
-            <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-sand-light tracking-tight leading-tight">
-              كشافة هب <span className="text-orange">🏕️</span>
-              <br />
-              <span className="text-white text-2xl sm:text-4xl md:text-5xl font-extrabold">
-                المنصة الذكية للمجموعات الكشفية
-              </span>
-            </h1>
+            {/* Responsive Hero Heading — protected against mobile horizontal overflow */}
+            <div className="space-y-1 sm:space-y-2 max-w-full overflow-hidden">
+              <h1 className="text-2xl sm:text-4xl md:text-5xl lg:text-6xl font-black text-sand-light tracking-tight leading-tight break-words">
+                {siteBranding.nameAr} <span className="text-orange">🏕️</span>
+              </h1>
+              <p className="text-white text-base sm:text-2xl md:text-3xl font-extrabold tracking-normal break-words">
+                {siteBranding.groupNameAr}
+              </p>
+            </div>
 
-            <p className="text-sm sm:text-base md:text-lg text-cream/80 max-w-2xl mx-auto leading-relaxed">
-              بطاقة هوية رقمية لكل كشاف، تسجيل حضور الجمعة بلمح البصر عبر الـ QR، وتوزيع متوازن وعادل للفرق
+            <p className="text-xs sm:text-base md:text-lg text-cream/85 max-w-2xl mx-auto leading-relaxed px-2">
+              بطاقة هوية رقمية لكل فرد، تسجيل حضور الجمعة بلمح البصر عبر الـ QR، وتوزيع متوازن وعادل للفرق
               والطلائع الكشفية مع أوسمة وشارات تحفيزية.
             </p>
 
             {/* Authenticated vs Guest Action Controls */}
             {isLoggedIn ? (
-              <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3 max-w-lg mx-auto">
+              <div className="pt-3 flex flex-col sm:flex-row items-center justify-center gap-3 max-w-lg mx-auto">
                 <Link href={dashboardHref} className="w-full sm:w-auto">
                   <Button variant="adventure" size="lg" className="w-full shadow-xl flex items-center justify-center gap-2">
                     {isSuperAdmin ? (
@@ -130,23 +153,23 @@ export default async function HomePage() {
                 </Link>
               </div>
             ) : (
-              <div className="pt-4 flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto">
+              <div className="pt-3 flex flex-col sm:flex-row items-center justify-center gap-3 max-w-md mx-auto">
                 <Link href="/register" className="w-full sm:w-auto">
                   <Button variant="adventure" size="lg" className="w-full shadow-xl">
-                    <span>انضم كفرد كشفي جديد</span>
+                    <span>انضم إلى كشافة الفنار</span>
                     <ArrowLeft className="w-5 h-5 mr-1" />
                   </Button>
                 </Link>
                 <Link href="/login" className="w-full sm:w-auto">
                   <Button variant="outline" size="lg" className="w-full border-sand text-sand hover:bg-sand/10">
-                    <span>تسجيل دخول الأعضاء</span>
+                    <span>تسجيل الدخول</span>
                   </Button>
                 </Link>
               </div>
             )}
 
             {/* Quick Feature Highlights Pill */}
-            <div className="pt-8 grid grid-cols-2 sm:grid-cols-4 gap-2.5 max-w-2xl mx-auto text-xs text-cream/90 font-semibold">
+            <div className="pt-6 grid grid-cols-2 sm:grid-cols-4 gap-2.5 max-w-2xl mx-auto text-xs text-cream/90 font-semibold">
               <div className="bg-forest-hover/70 p-2.5 rounded-xl border border-sand/20 flex items-center justify-center gap-1.5">
                 <QrCode className="w-4 h-4 text-orange" />
                 <span>بطاقة QR مشفرة</span>
@@ -173,7 +196,7 @@ export default async function HomePage() {
             <Badge variant="emerald" size="sm" className="mb-2">
               خطوات سريعة
             </Badge>
-            <h2 className="text-2xl sm:text-3xl font-extrabold text-forest">كيف تعمل منصة كشافة هب؟</h2>
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-forest">كيف تعمل منصة كشافة الفنار؟</h2>
             <p className="text-xs sm:text-sm text-charcoal/70 mt-1">تجربة كشفية عصرية وسلسة من هاتفك المحمول</p>
           </div>
 
@@ -185,7 +208,7 @@ export default async function HomePage() {
               <span className="text-xs font-black text-orange mb-1">الخطوة الأولى</span>
               <h3 className="text-base font-bold text-forest mb-2">بطاقتك الكشفية الرقمية</h3>
               <p className="text-xs text-charcoal/70 leading-relaxed">
-                كل كشاف بيحصل على بطاقة رقمية بـ QR كود مشفر وغير قابل للتخمين. تقدر تعرضها على الموبايل أو تطبعها.
+                كل كشاف يحصل على بطاقة رقمية بـ QR كود مشفر ومؤمن. يمكنك استعراضها على الموبايل في أي وقت أو طباعتها.
               </p>
             </div>
 
@@ -196,7 +219,7 @@ export default async function HomePage() {
               <span className="text-xs font-black text-orange mb-1">الخطوة الثانية</span>
               <h3 className="text-base font-bold text-forest mb-2">اجتماع الجمعة والزي</h3>
               <p className="text-xs text-charcoal/70 leading-relaxed">
-                أكد حضورك المسبق أسبوعيًا، وفي طابور الصباح القائد بيمسح بطاقتك ويسجل التزامك بالزي الكشفي وتوقيت الحضور.
+                تأكيد الحضور المسبق أسبوعيًا، وفي طابور الصباح يمسح القائد بطاقتك ويسجل التزامك بالزي الكشفي وتوقيت الحضور.
               </p>
             </div>
 
@@ -207,7 +230,7 @@ export default async function HomePage() {
               <span className="text-xs font-black text-orange mb-1">الخطوة الثالثة</span>
               <h3 className="text-base font-bold text-forest mb-2">طليعتك ومغامراتك</h3>
               <p className="text-xs text-charcoal/70 leading-relaxed">
-                اكتشف فريقك فور نشره من القادة، وتعرف على زملائك في الطليعة واجمع النقاط والأوسمة الكشفية.
+                اكتشف فريقك وطليعتك فور نشرها من القادة، وتعرف على زملائك في الطليعة وشارك في المسابقات واجمع النقاط والأوسمة.
               </p>
             </div>
           </div>
@@ -247,13 +270,24 @@ export default async function HomePage() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-forest text-cream/70 py-8 px-4 border-t border-forest-hover text-center text-xs space-y-2 no-print">
+      <footer className="bg-forest text-cream/75 py-8 px-4 border-t border-forest-hover text-center text-xs space-y-2 no-print">
         <div className="flex items-center justify-center gap-2 text-sand-light font-bold">
-          <Compass className="w-4 h-4 text-orange" />
-          <span>كشافة هب — Scout Hub Platform</span>
+          <div className="w-6 h-6 rounded-full overflow-hidden border border-sand/40 shrink-0">
+            <Image
+              src={siteBranding.logoUrl}
+              alt={siteBranding.nameAr}
+              width={24}
+              height={24}
+              className="w-full h-full object-cover"
+            />
+          </div>
+          <span>{siteBranding.fullTitleAr}</span>
         </div>
-        <p className="text-[11px] text-cream/50">
-          منصة مصممة بأعلى معايير الأمان وحماية خصوصية الكشافة والأشبال. جميع الحقوق محفوظة © 2026.
+        <p className="text-[11px] text-cream/60">
+          {siteBranding.descriptionAr}
+        </p>
+        <p className="text-[10px] text-cream/40 pt-1">
+          {siteBranding.copyright}
         </p>
       </footer>
 

@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Shield, RefreshCw, Printer, Compass, CheckCircle2 } from 'lucide-react';
+import { siteBranding } from '@/config/branding';
 import { Profile } from '@/types';
 import { formatQRPayload, generateQRCodeDataURL } from '@/lib/qr/qr-service';
 import { Button } from '@/components/ui/Button';
@@ -70,12 +72,18 @@ export function ScoutCard({ member, qrToken, onRotateToken, canRotate = true }: 
         {/* Card Header */}
         <div className="flex items-center justify-between border-b border-sand/20 pb-4 mb-4 relative z-10">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-orange flex items-center justify-center text-white shadow-sm">
-              <Compass className="w-5 h-5" />
+            <div className="w-10 h-10 rounded-full overflow-hidden bg-white/10 flex items-center justify-center border border-white/20 shadow-sm shrink-0">
+              <Image
+                src={siteBranding.logoUrl}
+                alt={siteBranding.nameAr}
+                width={40}
+                height={40}
+                className="w-full h-full object-cover"
+              />
             </div>
             <div>
-              <h4 className="text-sm font-black text-sand-light tracking-wide">كشافة هب</h4>
-              <p className="text-[10px] text-cream/70 font-medium">بطاقة الهوية الكشفية الرقمية</p>
+              <h4 className="text-sm font-black text-sand-light tracking-wide">{siteBranding.nameAr}</h4>
+              <p className="text-[9px] sm:text-[10px] text-cream/80 font-medium">{siteBranding.churchInscription}</p>
             </div>
           </div>
           <Badge variant="orange" size="sm">

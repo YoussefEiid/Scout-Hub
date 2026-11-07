@@ -401,7 +401,7 @@ export default function LeaderManagementPage() {
               required
               value={leaderEmail}
               onChange={(e) => setLeaderEmail(e.target.value)}
-              placeholder="leader@scouthub.app"
+              placeholder="leader@alfanar-scouts.com"
               className="w-full px-3 py-2 rounded-xl border border-sand bg-cream/20 text-xs focus:border-emerald outline-none text-right font-mono"
             />
           </div>

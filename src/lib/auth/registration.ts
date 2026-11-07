@@ -55,10 +55,15 @@ export async function registerScoutMember(input: RegisterInput): Promise<Registe
   }
 
   // Validate either dynamic section+year or legacy stageId
-  const hasDynamicScope = Boolean(input.sectionId && input.yearId);
+  const isValidUUID = (val?: string | null) =>
+    Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
+
+  const hasDynamicScope = Boolean(
+    input.sectionId && input.yearId && isValidUUID(input.sectionId) && isValidUUID(input.yearId)
+  );
   const stageId = input.stageId || 'stage_1';
 
-  if (!hasDynamicScope && !input.stageId) {
+  if (!hasDynamicScope && !input.stageId && !input.sectionId) {
     throw new AppError('VALIDATION', 'يجب اختيار القسم الكشفي والسنة الدراسية.');
   }
 
