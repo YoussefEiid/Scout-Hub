@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Calendar, ArrowRight, ShieldAlert, CheckCircle2 } from 'lucide-react';
 import { QRScannerView } from '@/components/scout/QRScannerView';
+import { BackButton } from '@/components/ui/BackButton';
 import {
   verifyScoutQRTokenAction,
   recordAttendanceAction,
@@ -70,11 +71,12 @@ export default function LeaderScannerPage() {
         <p className="text-xs text-charcoal/70">
           يتم فتح باب تسجيل الحضور تلقائياً صباح يوم الجمعة أو بتفعيل الجلسة من الإدارة العامة.
         </p>
-        <Link href="/leader" className="inline-block pt-2">
+        <BackButton fallbackUrl="/leader" label="رجوع للوحة القائد" />
+        {false && <Link href="/leader" className="inline-block pt-2">
           <button className="px-4 py-2 bg-forest text-sand-light rounded-xl text-xs font-bold">
             العودة للوحة القائد
           </button>
-        </Link>
+        </Link>}
       </div>
     );
   }
@@ -83,13 +85,14 @@ export default function LeaderScannerPage() {
     <main className="max-w-lg mx-auto w-full px-4 pt-4 space-y-4">
       {/* Breadcrumb & Navigation */}
       <div className="flex items-center justify-between">
-        <Link
+        <BackButton fallbackUrl="/leader" label="رجوع للوحة القائد" />
+        {false && <Link
           href="/leader"
           className="text-xs text-charcoal/60 hover:text-forest flex items-center gap-1 font-bold"
         >
           <span>لوحة القائد</span>
           <ArrowRight className="w-3.5 h-3.5" />
-        </Link>
+        </Link>}
         <span className="text-xs font-bold text-forest">ماسح حضور الجمعة المصرح به</span>
       </div>
 

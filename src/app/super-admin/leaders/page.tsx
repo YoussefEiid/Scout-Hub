@@ -389,7 +389,7 @@ export default function LeaderManagementPage() {
               required
               value={leaderFullName}
               onChange={(e) => setLeaderFullName(e.target.value)}
-              placeholder="مثال: القائد طارق محمود"
+              placeholder="الاسم الرباعي للقائد"
               className="w-full px-3 py-2 rounded-xl border border-sand bg-cream/20 text-xs focus:border-emerald outline-none text-right"
             />
           </div>

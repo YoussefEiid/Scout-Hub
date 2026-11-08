@@ -69,8 +69,8 @@ export default function MemberDashboardPage() {
 
       {/* Dev Mode Banner */}
       {isDemoMode && (
-        <div className="bg-sand border-b border-sand-light px-4 py-1.5 text-center text-xs font-bold text-forest">
-          <span>وضع العرض التجريبي المتكامل (Demo Mode) — 60 كشافاً مسجلين، حضور الجمعة وتوزيع الفرق جاهزة!</span>
+        <div className="hidden">
+
         </div>
       )}
 

@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { TopNavbar } from '@/components/navigation/TopNavbar';
 import { BottomMobileNav } from '@/components/navigation/BottomMobileNav';
 import { ScoutCard } from '@/components/scout/ScoutCard';
+import { BackButton } from '@/components/ui/BackButton';
 import { rotateMemberQRTokenAction, getMemberCardDataAction } from '@/app/actions/scout-actions';
 import { Profile } from '@/types';
 import { ShieldCheck } from 'lucide-react';
@@ -41,6 +42,9 @@ export default function DigitalCardPage() {
       <TopNavbar currentRole={member.roles?.[0]} userName={member.full_name} />
 
       <main className="max-w-md mx-auto w-full px-4 pt-6 space-y-6">
+        <div className="flex items-center justify-between no-print">
+          <BackButton fallbackUrl="/dashboard" label="رجوع للوحة الكشفية" />
+        </div>
         <div className="text-center space-y-1 no-print">
           <h1 className="text-xl sm:text-2xl font-black text-forest">بطاقة الهوية الكشفية الرقمية</h1>
           <p className="text-xs text-charcoal/70">

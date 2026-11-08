@@ -16,6 +16,7 @@ import {
 import { TopNavbar } from '@/components/navigation/TopNavbar';
 import { BottomMobileNav } from '@/components/navigation/BottomMobileNav';
 import { Button } from '@/components/ui/Button';
+import { BackButton } from '@/components/ui/BackButton';
 import { Card, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { getMyProfileAction, updateMyProfileAction } from '@/app/actions/scout-actions';
@@ -136,6 +137,9 @@ export default function ProfilePage() {
       <TopNavbar userName={profile?.full_name} currentRole={profile?.roles?.[0] || 'member'} />
 
       <main className="max-w-3xl mx-auto w-full px-4 pt-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <BackButton fallbackUrl="/dashboard" label="رجوع للوحة الكشفية" />
+        </div>
         {/* Profile Header Card */}
         <div className="relative overflow-hidden bg-gradient-to-r from-forest to-forest-hover rounded-3xl p-6 text-cream shadow-md">
           <div className="flex flex-col sm:flex-row items-center gap-5 relative z-10 text-center sm:text-right">

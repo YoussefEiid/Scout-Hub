@@ -378,7 +378,7 @@ export default function ScoutSectionsManagementPage() {
               required
               value={sectionName}
               onChange={(e) => setSectionName(e.target.value)}
-              placeholder="مثال: المرشدات أو الجوالة"
+              placeholder="الاسم العربي للقسم الكشفي"
               className="w-full px-3 py-2 rounded-xl border border-sand bg-cream/20 text-xs focus:border-emerald outline-none text-right"
             />
           </div>
@@ -393,7 +393,7 @@ export default function ScoutSectionsManagementPage() {
               disabled={Boolean(editingSection)}
               value={sectionCode}
               onChange={(e) => setSectionCode(e.target.value)}
-              placeholder="مثال: guides أو rovers"
+              placeholder="رمز القسم (أحرف إنجليزية)"
               className="w-full px-3 py-2 rounded-xl border border-sand bg-cream/20 text-xs focus:border-emerald outline-none text-right font-mono"
             />
           </div>
@@ -404,7 +404,7 @@ export default function ScoutSectionsManagementPage() {
               type="text"
               value={sectionDescription}
               onChange={(e) => setSectionDescription(e.target.value)}
-              placeholder="مثال: من سن 12 إلى 15 سنة"
+              placeholder="وصف المرحلة أو الفئة العمرية"
               className="w-full px-3 py-2 rounded-xl border border-sand bg-cream/20 text-xs focus:border-emerald outline-none text-right"
             />
           </div>
@@ -459,7 +459,7 @@ export default function ScoutSectionsManagementPage() {
               required
               value={yearName}
               onChange={(e) => setYearName(e.target.value)}
-              placeholder="مثال: السنة الرابعة أو فوج المستجدين"
+              placeholder="اسم السنة أو المستوى"
               className="w-full px-3 py-2 rounded-xl border border-sand bg-cream/20 text-xs focus:border-emerald outline-none text-right"
             />
           </div>
