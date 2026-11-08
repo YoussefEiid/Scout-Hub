@@ -61,7 +61,10 @@ export default function LeaderTeamsPage() {
           setMetrics(data.metrics);
         }
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : 'فشل تحميل بيانات طلائع القسم.';
+        const rawMsg = err instanceof Error ? err.message : '';
+        const msg = (rawMsg.includes('441') || rawMsg.includes('digest') || rawMsg.includes('Server Components'))
+          ? 'تعذر تحميل بيانات طلائع القسم بسبب خطأ في الخادم. يرجى تحديث الصفحة.'
+          : (rawMsg || 'فشل تحميل بيانات طلائع القسم.');
         setErrorMessage(msg);
       }
     }
@@ -82,7 +85,10 @@ export default function LeaderTeamsPage() {
       const data = await getAdminTeamsDataAction();
       if (data.metrics) setMetrics(data.metrics);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'حدث خطأ أثناء توزيع الطلائع.';
+      const rawMsg = err instanceof Error ? err.message : '';
+      const msg = (rawMsg.includes('441') || rawMsg.includes('digest') || rawMsg.includes('Server Components'))
+        ? 'تعذر توزيع الطلائع في الوقت الحالي. يرجى المحاولة مرة أخرى.'
+        : (rawMsg || 'حدث خطأ أثناء توزيع الطلائع.');
       setErrorMessage(msg);
     } finally {
       setIsGenerating(false);
@@ -99,7 +105,10 @@ export default function LeaderTeamsPage() {
       setPublishSuccess(true);
       setTimeout(() => setPublishSuccess(false), 5000);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'حدث خطأ أثناء نشر تشكيل الطلائع.';
+      const rawMsg = err instanceof Error ? err.message : '';
+      const msg = (rawMsg.includes('441') || rawMsg.includes('digest') || rawMsg.includes('Server Components'))
+        ? 'تعذر نشر تشكيل الطلائع في الوقت الحالي. يرجى المحاولة لاحقًا.'
+        : (rawMsg || 'حدث خطأ أثناء نشر تشكيل الطلائع.');
       setErrorMessage(msg);
     } finally {
       setIsPublishing(false);

@@ -1,5 +1,10 @@
 import assert from 'node:assert';
 import { describe, it } from 'node:test';
+
+try {
+  process.loadEnvFile('.env.local');
+} catch {}
+
 import { generateMixedStageTeams, generateSeparateStageTeams, isEligibleScout } from '@/lib/teams/distribution-engine';
 import { normalizePhoneNumber } from '@/lib/auth/registration';
 import { getSectionDisplayName, getSectionYearDisplayName, getFullScoutScopeDisplay } from '@/lib/sections/section-helper';
@@ -120,5 +125,27 @@ describe('Team Distribution Engine & Child-Friendly Identity Tests', () => {
     assert.strictEqual(getSectionDisplayName(fullScope), 'فريق كشافة');
     assert.strictEqual(getSectionYearDisplayName(fullScope), 'سنة ثانية');
     assert.strictEqual(getFullScoutScopeDisplay(fullScope), 'فريق كشافة — سنة ثانية');
+  });
+
+  it('7. Demo Mode: Child registration succeeds without email and generates valid scout number', async () => {
+    const prevDemo = process.env.SCOUT_DEMO_MODE;
+    process.env.SCOUT_DEMO_MODE = 'true';
+    try {
+      const { registerScoutMember } = await import('@/lib/auth/registration');
+      const result = await registerScoutMember({
+        fullName: 'كشاف جديد بدون إيميل',
+        stageId: 'stage_1',
+        commitment: 'committed',
+        phone: '01012345678',
+        password: 'ScoutPassword123!',
+      });
+
+      assert.ok(result.member_number, 'Must generate member number');
+      assert.ok(result.member_number.startsWith('SCT-'), 'Member number starts with SCT-');
+      assert.strictEqual(result.full_name, 'كشاف جديد بدون إيميل');
+      assert.strictEqual(result.is_active, true);
+    } finally {
+      process.env.SCOUT_DEMO_MODE = prevDemo;
+    }
   });
 });

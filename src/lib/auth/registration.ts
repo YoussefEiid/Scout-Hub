@@ -126,11 +126,11 @@ export async function registerScoutMember(input: RegisterInput): Promise<Registe
     throw new AppError('VALIDATION', 'كلمة المرور يجب أن تتكون من 6 أحرف على الأقل.');
   }
 
-  // If email is provided, validate; if not, generate a dedicated internal scout identifier
+  // If email is provided, validate; if not, use official institutional member domain
   const effectiveEmail =
     input.email && input.email.trim().length > 0
       ? input.email.trim()
-      : `scout.${Date.now()}.${Math.floor(1000 + Math.random() * 9000)}@alfanar.internal`;
+      : `scout.${Date.now()}.${Math.floor(1000 + Math.random() * 9000)}@members.alfanar-scouts.org`;
 
   const adminClient = createAdminClient();
 
@@ -139,7 +139,7 @@ export async function registerScoutMember(input: RegisterInput): Promise<Registe
     email: effectiveEmail,
     password: input.password,
     email_confirm: true,
-    user_metadata: { full_name: trimmedName },
+    user_metadata: { full_name: trimmedName, is_child_scout: !input.email },
   });
 
   if (authErr || !authUser?.user) {
@@ -178,6 +178,16 @@ export async function registerScoutMember(input: RegisterInput): Promise<Registe
       });
       if (rpcErr) throw mapDbError(rpcErr);
       memberNumber = data as string;
+    }
+
+    // If registered without email, canonically bind official member number UPN
+    if (!input.email || input.email.trim().length === 0) {
+      const canonicalUpn = `${memberNumber.toLowerCase().replace(/[^a-z0-9]/g, '.')}@members.alfanar-scouts.org`;
+      try {
+        await adminClient.auth.admin.updateUserById(userId, { email: canonicalUpn });
+      } catch (upnErr) {
+        console.warn('[registration] canonical UPN update notice:', upnErr);
+      }
     }
 
     return {

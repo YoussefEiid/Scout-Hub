@@ -789,7 +789,7 @@ export async function getDistributionDetail(
   const { data: teams, error: tErr } = await client
     .from('teams')
     .select(
-      'id, distribution_id, name, stage_id, section_id, year_id, leader_id, color_hex, icon_name, total_points, created_at, team_memberships(id, team_id, member_id, is_leader, profiles(id, member_number, full_name, stage_id, section_id, year_id))'
+      'id, distribution_id, name, stage_id, section_id, year_id, leader_id, color_hex, icon_name, total_points, created_at, team_memberships!team_memberships_team_id_fkey(id, team_id, member_id, is_leader, profiles(id, member_number, full_name, stage_id, section_id, year_id))'
     )
     .eq('distribution_id', distributionId);
   if (tErr) throw mapDbError(tErr);

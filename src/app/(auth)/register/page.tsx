@@ -100,20 +100,22 @@ export default function RegisterPage() {
       return;
     }
 
-    if (!email.trim() || !password) {
-      setError('البريد الإلكتروني وكلمة المرور مطلوبان لإنشاء الحساب');
-      return;
-    }
-
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email.trim())) {
-      setError('يرجى إدخال بريد إلكتروني صالح');
+    if (!password) {
+      setError('يرجى إدخال كلمة المرور لإنشاء الحساب');
       return;
     }
 
     if (password.length < 6) {
       setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل');
       return;
+    }
+
+    if (email.trim()) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email.trim())) {
+        setError('يرجى إدخال بريد إلكتروني صالح أو ترك الحقل فارغًا');
+        return;
+      }
     }
 
     if (!agreedPrivacy) {
@@ -129,7 +131,7 @@ export default function RegisterPage() {
         yearId: selectedYearId,
         commitment: commitment as CommitmentPreference,
         phone: phone.trim() || undefined,
-        email: email.trim(),
+        email: email.trim() || undefined,
         password,
       });
 
@@ -198,7 +200,7 @@ export default function RegisterPage() {
                   تم إنشاء حسابك وبطاقتك الكشفية بنجاح في {siteBranding.groupNameAr}.
                 </p>
                 <p className="text-xs text-emerald-dark font-medium mt-2 bg-emerald/10 p-2.5 rounded-xl border border-emerald/20">
-                  راجع بريدك الإلكتروني لتأكيد حسابك، وبعدها تقدر تسجل الدخول.
+                  تم تفعيل حسابك بنجاح! احفظ رقم القيد الكشفي لتسجيل الدخول به أو برقم هاتفك مع كلمة المرور التي اخترتها.
                 </p>
               </div>
 
@@ -389,17 +391,17 @@ export default function RegisterPage() {
               <div className="space-y-3 pt-1">
                 <div>
                   <label htmlFor="reg-email" className="block text-xs font-bold text-charcoal/80 mb-1">
-                    البريد الإلكتروني للحساب *
+                    البريد الإلكتروني <span className="text-charcoal/50 font-normal">(اختياري - غير مطلوب للأطفال)</span>
                   </label>
                   <div className="relative">
                     <input
                       id="reg-email"
                       type="email"
-                      required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       autoComplete="email"
-                      className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
+                      placeholder="اختياري (يمكن تركه فارغاً)"
+                      className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right placeholder:text-charcoal/30"
                     />
                     <Mail className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5 pointer-events-none" />
                   </div>

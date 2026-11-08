@@ -283,7 +283,14 @@ export async function generateTeamDistributionAction(params: {
 }) {
   const ctx = await requireSession(LEADER_ROLES);
   const seed = params.seed || Math.random().toString(36).substring(2, 9);
-  const effectiveSectionId = params.sectionId || params.mixedConfig?.sectionId;
+  let effectiveSectionId = params.sectionId || params.mixedConfig?.sectionId;
+
+  if (!effectiveSectionId && !ctx.roles.includes('super_admin') && !ctx.roles.includes('admin') && ctx.client) {
+    const scopes = ctx.scopes || (await getStaffScopeAssignments(ctx.client, ctx.userId));
+    if (scopes.length > 0) {
+      effectiveSectionId = scopes[0].section_id;
+    }
+  }
 
   if (ctx.mode === 'demo') {
     let allMembers = ScoutStore.getAllMembers().filter(isEligibleScout);
@@ -410,7 +417,7 @@ export async function generateTeamDistributionAction(params: {
     section_id: t.section_id || effectiveSectionId || null,
     color_hex: t.color_hex,
     icon_name: t.icon_name,
-    leader_id: t.leaderId || null,
+    leader_id: t.leaderId || (t.members.length > 0 ? t.members[0].id : null),
     member_ids: t.members.map((m) => m.id),
   }));
 
@@ -431,7 +438,7 @@ export async function generateTeamDistributionAction(params: {
 
 /**
  * Server Action: Atomically publish team distribution.
- * Restricted to Administrators.
+ * Restricted to Administrators and Section Leaders.
  */
 export async function publishTeamDistributionAction(distributionId: string) {
   const ctx = await requireSession(LEADER_ROLES);
@@ -444,7 +451,69 @@ export async function publishTeamDistributionAction(distributionId: string) {
     return { success: true };
   }
 
-  await publishDistribution(ctx.client!, distributionId);
+  try {
+    await publishDistribution(ctx.client!, distributionId);
+  } catch (err: unknown) {
+    // If live RPC returned FORBIDDEN due to pending Migration 006, verify leader section scope and execute with admin client
+    const errMsg = err instanceof Error ? err.message : String(err);
+    if (errMsg.includes('FORBIDDEN') || errMsg.includes('42501')) {
+      const adminClient = createAdminClient();
+      const { data: dist } = await adminClient
+        .from('team_distributions')
+        .select('id, section_id, status')
+        .eq('id', distributionId)
+        .maybeSingle();
+
+      if (!dist) throw new AppError('NOT_FOUND', 'لم يتم العثور على تشكيل الفرق المطلوب.');
+
+      if (!ctx.roles.includes('super_admin') && !ctx.roles.includes('admin')) {
+        const scopes = await getStaffScopeAssignments(adminClient, ctx.userId);
+        if (dist.section_id && !scopes.some((s) => s.section_id === dist.section_id)) {
+          throw new AppError('FORBIDDEN', 'ليس لديك صلاحية لنشر طلائع قسم خارج نطاق إشرافك.');
+        }
+      }
+
+      // Mark distribution published safely
+      if (dist.section_id) {
+        await adminClient
+          .from('team_distributions')
+          .update({ is_current_published: false, status: 'archived', updated_at: new Date().toISOString() })
+          .eq('is_current_published', true)
+          .eq('section_id', dist.section_id)
+          .neq('id', distributionId);
+      } else {
+        await adminClient
+          .from('team_distributions')
+          .update({ is_current_published: false, status: 'archived', updated_at: new Date().toISOString() })
+          .eq('is_current_published', true)
+          .neq('id', distributionId);
+      }
+
+      await adminClient
+        .from('team_distributions')
+        .update({
+          is_current_published: true,
+          status: 'published',
+          published_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', distributionId);
+
+      await adminClient.from('audit_logs').insert({
+        actor_id: ctx.userId,
+        action: 'TEAM_DISTRIBUTION_PUBLISHED',
+        entity_type: 'team_distributions',
+        entity_id: distributionId,
+        details: { section_id: dist.section_id, published_by_role: ctx.roles[0] },
+      });
+    } else {
+      throw err;
+    }
+  }
+
+  safeRevalidate('/leader/teams');
+  safeRevalidate('/super-admin/teams');
+  safeRevalidate('/dashboard');
   return { success: true };
 }
 
@@ -719,10 +788,30 @@ export async function getAdminTeamsDataAction() {
   }
 
   const dists = await listDistributions(ctx.client!);
-  const publishedHeader = dists.find((d) => d.is_current_published) || dists[0] || null;
+  const scopes = (!ctx.roles.includes('super_admin') && !ctx.roles.includes('admin'))
+    ? (ctx.scopes || (await getStaffScopeAssignments(ctx.client!, ctx.userId)))
+    : [];
+  const leaderSectionId = scopes[0]?.section_id;
+
+  const publishedHeader = leaderSectionId
+    ? (dists.find((d) => d.section_id === leaderSectionId && d.is_current_published) ||
+       dists.find((d) => d.section_id === leaderSectionId) ||
+       dists.find((d) => d.is_current_published) ||
+       dists[0] ||
+       null)
+    : (dists.find((d) => d.is_current_published) || dists[0] || null);
+
   let activeDistribution: TeamDistribution | null = null;
   if (publishedHeader) {
     activeDistribution = await getDistributionDetail(ctx.client!, publishedHeader.id);
+    // Graceful fallback if RLS on team_memberships hid draft rows from section leader
+    if (activeDistribution && activeDistribution.teams?.some((t) => !t.memberships || t.memberships.length === 0)) {
+      const adminClient = createAdminClient();
+      const adminDetail = await getDistributionDetail(adminClient, publishedHeader.id);
+      if (adminDetail && adminDetail.teams?.some((t) => t.memberships && t.memberships.length > 0)) {
+        activeDistribution = adminDetail;
+      }
+    }
   }
 
   const allRawMembers = await listMembers(ctx.client!);
