@@ -1,5 +1,6 @@
 'use server';
 
+import { revalidatePath } from 'next/cache';
 import { AppError } from '@/lib/actions/result';
 import {
   requireSession,
@@ -772,7 +773,11 @@ export async function createScoutSectionAction(input: {
   if (ctx.mode === 'demo') {
     return { id: 'demo-new-sec', ...input, is_active: true, created_at: '', updated_at: '' };
   }
-  return createScoutSection(ctx.client!, input);
+  const res = await createScoutSection(ctx.client!, input);
+  revalidatePath('/register');
+  revalidatePath('/super-admin/sections');
+  revalidatePath('/super-admin/members');
+  return res;
 }
 
 export async function updateScoutSectionAction(id: string, updates: Partial<ScoutSection>) {
@@ -780,7 +785,11 @@ export async function updateScoutSectionAction(id: string, updates: Partial<Scou
   if (ctx.mode === 'demo') {
     return { id, ...updates };
   }
-  return updateScoutSection(ctx.client!, id, updates);
+  const res = await updateScoutSection(ctx.client!, id, updates);
+  revalidatePath('/register');
+  revalidatePath('/super-admin/sections');
+  revalidatePath('/super-admin/members');
+  return res;
 }
 
 export async function createSectionYearAction(input: {
@@ -792,7 +801,11 @@ export async function createSectionYearAction(input: {
   if (ctx.mode === 'demo') {
     return { id: 'demo-new-yr', ...input, is_active: true, created_at: '', updated_at: '' };
   }
-  return createSectionYear(ctx.client!, input);
+  const res = await createSectionYear(ctx.client!, input);
+  revalidatePath('/register');
+  revalidatePath('/super-admin/sections');
+  revalidatePath('/super-admin/members');
+  return res;
 }
 
 export async function updateSectionYearAction(id: string, updates: Partial<ScoutSectionYear>) {
@@ -800,7 +813,11 @@ export async function updateSectionYearAction(id: string, updates: Partial<Scout
   if (ctx.mode === 'demo') {
     return { id, ...updates };
   }
-  return updateSectionYear(ctx.client!, id, updates);
+  const res = await updateSectionYear(ctx.client!, id, updates);
+  revalidatePath('/register');
+  revalidatePath('/super-admin/sections');
+  revalidatePath('/super-admin/members');
+  return res;
 }
 
 // ============================================================================

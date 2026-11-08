@@ -15,6 +15,7 @@ import {
   Mail,
   Eye,
   EyeOff,
+  RefreshCw,
 } from 'lucide-react';
 import { CommitmentPreference, ScoutSection } from '@/types';
 import { registerMemberAction, getActiveScoutSectionsAction } from '@/app/actions/scout-actions';
@@ -36,31 +37,37 @@ export default function RegisterPage() {
   const [agreedPrivacy, setAgreedPrivacy] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingSections, setIsLoadingSections] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [successMemberNumber, setSuccessMemberNumber] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadSections() {
-      try {
-        const data = await getActiveScoutSectionsAction();
-        setSections(data || []);
-        // Neutral initial state: do not automatically select any section or year
-      } catch (err) {
-        console.error('Failed to load active sections', err);
-      } finally {
-        setIsLoadingSections(false);
-      }
+  const fetchSections = async () => {
+    setIsLoadingSections(true);
+    setLoadError(null);
+    try {
+      const data = await getActiveScoutSectionsAction();
+      setSections(data || []);
+      // Neutral initial state: do not automatically select any section or year
+    } catch (err) {
+      console.error('Failed to load active sections', err);
+      setLoadError('تعذر تحميل الأقسام الكشفية. يرجى التحقق من الاتصال وإعادة المحاولة.');
+    } finally {
+      setIsLoadingSections(false);
     }
-    loadSections();
+  };
+
+  useEffect(() => {
+    fetchSections();
   }, []);
 
   const currentSection = sections.find((s) => s.id === selectedSectionId);
-  const currentYears = currentSection?.years || [];
+  const currentYears = (currentSection?.years || []).filter((y) => y.is_active);
 
   const handleSectionChange = (sectionId: string) => {
     setSelectedSectionId(sectionId);
     // When the selected section changes, reset the year selection
     setSelectedYearId('');
+    if (error) setError(null);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -69,12 +76,17 @@ export default function RegisterPage() {
     setError(null);
 
     if (!fullName.trim() || fullName.trim().length < 3) {
-      setError('يرجى كتابة الاسم الثلاثي أو الرباعي');
+      setError('يرجى كتابة الاسم الثلاثي أو الرباعي (3 أحرف على الأقل)');
       return;
     }
 
     if (!selectedSectionId) {
       setError('يرجى اختيار القسم الكشفي');
+      return;
+    }
+
+    if (currentYears.length === 0) {
+      setError('القسم الكشفي المختار لا يحتوي على سنوات كشفية نشطة حاليًا. يرجى اختيار قسم آخر.');
       return;
     }
 
@@ -131,8 +143,12 @@ export default function RegisterPage() {
         msg.includes('Minified React error')
       ) {
         setError('تعذر إتمام التسجيل بسبب خطأ مؤقت في الخادم. يرجى مراجعة البيانات والمحاولة لاحقًا.');
-      } else if (msg.includes('already registered') || msg.includes('User already registered')) {
+      } else if (msg.includes('already registered') || msg.includes('User already registered') || msg.includes('مسجل بالفعل')) {
         setError('هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول أو استخدام بريد آخر.');
+      } else if (msg.includes('INVALID_SECTION')) {
+        setError('القسم الكشفي المحدد غير صالح أو غير نشط.');
+      } else if (msg.includes('INVALID_YEAR')) {
+        setError('السنة الكشفية المحددة لا تنتمي لهذا القسم أو غير نشطة.');
       } else {
         setError(msg || 'حدث خطأ أثناء التسجيل. يرجى مراجعة البيانات والمحاولة مرة أخرى.');
       }
@@ -207,6 +223,23 @@ export default function RegisterPage() {
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4" noValidate>
+              {loadError && (
+                <div className="p-3 rounded-xl bg-amber-50 text-amber-800 border border-amber-200 text-xs font-bold flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                    <span>{loadError}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={fetchSections}
+                    className="p-1 rounded-lg hover:bg-amber-100 text-amber-700 transition-colors"
+                    title="إعادة المحاولة"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
               {error && (
                 <div className="p-3 rounded-xl bg-red-50 text-red-700 border border-red-200 text-xs font-bold flex items-center gap-2">
                   <AlertCircle className="w-4 h-4 shrink-0" />
@@ -216,11 +249,12 @@ export default function RegisterPage() {
 
               {/* Full Name */}
               <div>
-                <label className="block text-xs font-bold text-charcoal/80 mb-1">
+                <label htmlFor="reg-fullname" className="block text-xs font-bold text-charcoal/80 mb-1">
                   الاسم الكامل (الاسم الثلاثي أو الرباعي) *
                 </label>
                 <div className="relative">
                   <input
+                    id="reg-fullname"
                     type="text"
                     required
                     value={fullName}
@@ -228,23 +262,24 @@ export default function RegisterPage() {
                     autoComplete="name"
                     className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
                   />
-                  <User className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5" />
+                  <User className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5 pointer-events-none" />
                 </div>
               </div>
 
               {/* Scout Section Selection (Dynamic) */}
               <div>
-                <label className="block text-xs font-bold text-charcoal/80 mb-1">
+                <label htmlFor="reg-section" className="block text-xs font-bold text-charcoal/80 mb-1">
                   القسم الكشفي *
                 </label>
                 <div className="relative">
                   <select
+                    id="reg-section"
                     value={selectedSectionId}
                     onChange={(e) => handleSectionChange(e.target.value)}
                     disabled={isLoadingSections}
-                    className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
+                    className="w-full pr-4 pl-9 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right disabled:opacity-50 disabled:bg-sand/20 cursor-pointer"
                   >
-                    <option value="">اختر القسم الكشفي</option>
+                    <option value="">{isLoadingSections ? 'جاري تحميل الأقسام الكشفية...' : 'اختر القسم الكشفي'}</option>
                     {sections.map((sec) => (
                       <option key={sec.id} value={sec.id}>
                         {sec.name} {sec.description ? `(${sec.description})` : ''}
@@ -257,36 +292,67 @@ export default function RegisterPage() {
 
               {/* Section Year Selection (Cascading Dynamic) */}
               <div>
-                <label className="block text-xs font-bold text-charcoal/80 mb-1">
+                <label htmlFor="reg-year" className="block text-xs font-bold text-charcoal/80 mb-1">
                   السنة الكشفية / المستوى *
                 </label>
                 <div className="relative">
                   <select
+                    id="reg-year"
                     value={selectedYearId}
-                    onChange={(e) => setSelectedYearId(e.target.value)}
+                    onChange={(e) => {
+                      setSelectedYearId(e.target.value);
+                      if (error) setError(null);
+                    }}
                     disabled={isLoadingSections || !selectedSectionId || currentYears.length === 0}
-                    className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right disabled:opacity-50 disabled:bg-sand/20"
+                    className="w-full pr-4 pl-9 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right disabled:opacity-50 disabled:bg-sand/20 cursor-pointer"
                   >
-                    <option value="">اختر السنة الكشفية</option>
-                    {currentYears.map((yr) => (
-                      <option key={yr.id} value={yr.id}>
-                        {yr.name}
-                      </option>
-                    ))}
+                    {!selectedSectionId ? (
+                      <option value="">(اختر القسم الكشفي أولاً)</option>
+                    ) : currentYears.length === 0 ? (
+                      <option value="">(لا توجد سنوات كشفية متاحة لهذا القسم)</option>
+                    ) : (
+                      <>
+                        <option value="">اختر السنة الكشفية</option>
+                        {currentYears.map((yr) => (
+                          <option key={yr.id} value={yr.id}>
+                            {yr.name}
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
                   <Calendar className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5 pointer-events-none" />
                 </div>
+
+                {/* Helpful status text depending on section selection */}
+                {!selectedSectionId && (
+                  <p className="text-[11px] text-charcoal/60 mt-1">
+                    حدد القسم الكشفي أعلاه أولاً لتفعيل واختيار السنة الكشفية المناسبة.
+                  </p>
+                )}
+                {selectedSectionId && currentYears.length === 0 && (
+                  <div className="mt-1.5 p-2 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-center gap-1.5 font-medium">
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                    <span>لا توجد سنوات أو أفواج كشفية نشطة مضافة لهذا القسم حاليًا. يرجى اختيار قسم آخر أو التواصل مع قادة الفوج.</span>
+                  </div>
+                )}
+                {selectedSectionId && currentYears.length > 0 && (
+                  <p className="text-[11px] text-emerald-dark font-medium mt-1">
+                    ✓ تم تحميل {currentYears.length} سنوات كشفية معتمدة لقسم {currentSection?.name}.
+                  </p>
+                )}
               </div>
 
               {/* Commitment Preference */}
               <div>
-                <label className="block text-xs font-bold text-charcoal/80 mb-1">
+                <label htmlFor="reg-commitment" className="block text-xs font-bold text-charcoal/80 mb-1">
                   تفضيل الالتزام الأولي بالحضور *
                 </label>
                 <select
+                  id="reg-commitment"
                   value={commitment}
                   onChange={(e) => setCommitment(e.target.value as CommitmentPreference)}
-                  className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
+                  className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right cursor-pointer"
                 >
                   <option value="">اختر حالة الالتزام</option>
                   <option value="committed">ملتزم بالحضور أسبوعيًا</option>
@@ -300,18 +366,19 @@ export default function RegisterPage() {
 
               {/* Optional Phone */}
               <div>
-                <label className="block text-xs font-bold text-charcoal/80 mb-1">
+                <label htmlFor="reg-phone" className="block text-xs font-bold text-charcoal/80 mb-1">
                   رقم الهاتف للتواصل للطوارئ (اختياري وسري)
                 </label>
                 <div className="relative">
                   <input
+                    id="reg-phone"
                     type="tel"
                     value={phone}
                     onChange={(e) => setPhone(e.target.value)}
                     autoComplete="tel"
                     className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right font-mono"
                   />
-                  <Phone className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5" />
+                  <Phone className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5 pointer-events-none" />
                 </div>
                 <p className="text-[10px] text-charcoal/50 mt-1">
                   حماية كاملة: أرقام الهواتف سرية ولا تظهر لباقي الكشافة في الطليعة.
@@ -321,11 +388,12 @@ export default function RegisterPage() {
               {/* Email & Password for Supabase Auth */}
               <div className="space-y-3 pt-1">
                 <div>
-                  <label className="block text-xs font-bold text-charcoal/80 mb-1">
+                  <label htmlFor="reg-email" className="block text-xs font-bold text-charcoal/80 mb-1">
                     البريد الإلكتروني للحساب *
                   </label>
                   <div className="relative">
                     <input
+                      id="reg-email"
                       type="email"
                       required
                       value={email}
@@ -333,21 +401,22 @@ export default function RegisterPage() {
                       autoComplete="email"
                       className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
                     />
-                    <Mail className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5" />
+                    <Mail className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5 pointer-events-none" />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-charcoal/80 mb-1">
+                  <label htmlFor="reg-password" className="block text-xs font-bold text-charcoal/80 mb-1">
                     كلمة المرور (6 أحرف على الأقل) *
                   </label>
                   <div className="relative">
                     <input
+                      id="reg-password"
                       type={showPassword ? 'text' : 'password'}
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       autoComplete="new-password"
-                      className="w-full px-4 py-2.5 pl-10 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right font-mono"
+                      className="w-full px-4 py-2.5 pl-10 pr-9 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right font-mono"
                     />
                     <button
                       type="button"

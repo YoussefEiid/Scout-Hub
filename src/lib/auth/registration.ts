@@ -58,13 +58,22 @@ export async function registerScoutMember(input: RegisterInput): Promise<Registe
   const isValidUUID = (val?: string | null) =>
     Boolean(val && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(val));
 
+  if (input.sectionId || input.yearId) {
+    if (!input.sectionId || !isValidUUID(input.sectionId)) {
+      throw new AppError('VALIDATION', 'يجب اختيار قسم كشفي صالح.');
+    }
+    if (!input.yearId || !isValidUUID(input.yearId)) {
+      throw new AppError('VALIDATION', 'يجب اختيار سنة كشفية صالحة تابعة للقسم المحدد.');
+    }
+  }
+
   const hasDynamicScope = Boolean(
     input.sectionId && input.yearId && isValidUUID(input.sectionId) && isValidUUID(input.yearId)
   );
   const stageId = input.stageId || 'stage_1';
 
-  if (!hasDynamicScope && !input.stageId && !input.sectionId) {
-    throw new AppError('VALIDATION', 'يجب اختيار القسم الكشفي والسنة الدراسية.');
+  if (!hasDynamicScope && !input.stageId) {
+    throw new AppError('VALIDATION', 'يجب اختيار القسم الكشفي والسنة الكشفية.');
   }
 
   const mode = getBackendMode();

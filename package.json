@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "npx tsx --test tests/security/static-guards.test.ts tests/db/migrations.pglite.test.ts tests/db/migrations.003.pglite.test.ts tests/staging/restore-sql-backup-verification.test.ts tests/staging/restore-and-validate-live-backup.test.ts tests/scout-hub.test.ts tests/integration/supabase.live.test.ts tests/integration/supabase.e2e.test.ts"
+    "test": "npx tsx --test tests/security/static-guards.test.ts tests/db/migrations.pglite.test.ts tests/db/migrations.003.pglite.test.ts tests/staging/restore-sql-backup-verification.test.ts tests/staging/restore-and-validate-live-backup.test.ts tests/scout-hub.test.ts tests/integration/supabase.live.test.ts tests/integration/supabase.e2e.test.ts tests/unit/section-year-selector.test.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

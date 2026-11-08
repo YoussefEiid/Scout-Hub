@@ -49,6 +49,8 @@ export function mapDbError(error: { message?: string; code?: string } | null | u
   if (msg.includes('STAGE_MISMATCH')) return new AppError('VALIDATION', 'لا يمكن نقل كشاف إلى فريق من مرحلة أخرى في نمط المراحل المنفصلة.');
   if (msg.includes('DUPLICATE_MEMBER')) return new AppError('VALIDATION', 'يوجد كشاف مكرر داخل التوزيع.');
   if (msg.includes('INVALID_MEMBER')) return new AppError('VALIDATION', 'التوزيع يحتوي على عضو غير موجود أو غير نشط.');
+  if (msg.includes('INVALID_SECTION')) return new AppError('VALIDATION', 'القسم الكشفي المحدد غير صالح أو غير نشط.');
+  if (msg.includes('INVALID_YEAR')) return new AppError('VALIDATION', 'السنة الكشفية المحددة لا تنتمي لهذا القسم أو غير نشطة.');
   if (msg.includes('DISTRIBUTION_NOT_FOUND')) return new AppError('NOT_FOUND', 'التوزيع المطلوب غير موجود.');
   if (msg.includes('EMPTY_DISTRIBUTION') || msg.includes('NO_TEAMS')) return new AppError('VALIDATION', 'لا يمكن نشر توزيع بلا فرق.');
   if (msg.includes('MEMBER_NOT_FOUND') || msg.includes('NO_ACTIVE_PROFILE')) return new AppError('NOT_FOUND', 'لم يتم العثور على ملف الكشاف.');
