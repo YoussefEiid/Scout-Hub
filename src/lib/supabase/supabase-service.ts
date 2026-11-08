@@ -723,12 +723,23 @@ export async function saveTeamDraft(
   client: SupabaseClient,
   params: { title: string; mode: DistributionMode; seed: string; teams: DraftTeamInput[]; sectionId?: string | null }
 ): Promise<string> {
-  return callRpc<string>(client, 'save_team_distribution_draft', {
-    p_title: params.title,
-    p_mode: params.mode,
-    p_seed: params.seed,
-    p_teams: params.teams,
-  });
+  try {
+    return await callRpc<string>(client, 'save_team_distribution_draft', {
+      p_title: params.title,
+      p_mode: params.mode,
+      p_seed: params.seed,
+      p_teams: params.teams,
+      p_section_id: params.sectionId || null,
+    });
+  } catch (err: unknown) {
+    // Graceful fallback to 4-parameter legacy signature if migration 005 is pending
+    return await callRpc<string>(client, 'save_team_distribution_draft', {
+      p_title: params.title,
+      p_mode: params.mode,
+      p_seed: params.seed,
+      p_teams: params.teams,
+    });
+  }
 }
 
 export async function swapDraftMembers(

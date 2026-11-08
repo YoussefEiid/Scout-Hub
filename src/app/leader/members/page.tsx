@@ -7,6 +7,7 @@ import { Card } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { getLeaderMembersAction } from '@/app/actions/scout-actions';
 import { Profile } from '@/types';
+import { getSectionDisplayName, getSectionYearDisplayName } from '@/lib/sections/section-helper';
 
 export default function LeaderMembersPage() {
   const [members, setMembers] = useState<Profile[]>([]);
@@ -105,10 +106,10 @@ export default function LeaderMembersPage() {
                     </td>
                     <td className="py-3 px-4">
                       <span className="bg-sand/30 text-forest px-2.5 py-0.5 rounded-full text-[11px] font-bold">
-                        {m.section?.name || m.stage_id}
+                        {getSectionDisplayName(m)}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-charcoal/70">{m.year?.name || 'عام'}</td>
+                    <td className="py-3 px-4 text-charcoal/70">{getSectionYearDisplayName(m) || 'غير محدد'}</td>
                     <td className="py-3 px-4">
                       <Badge
                         variant={m.initial_commitment === 'committed' ? 'emerald' : 'neutral'}

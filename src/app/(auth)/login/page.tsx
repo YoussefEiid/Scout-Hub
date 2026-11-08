@@ -8,7 +8,7 @@ import { Compass, User, AlertCircle, ArrowLeft, Eye, EyeOff } from 'lucide-react
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
 import { BackButton } from '@/components/ui/BackButton';
-import { createClient } from '@/lib/supabase/client';
+import { loginScoutMemberAction } from '@/app/actions/scout-actions';
 import { siteBranding } from '@/config/branding';
 
 function LoginFormContent() {
@@ -44,7 +44,7 @@ function LoginFormContent() {
     if (isLoading) return;
 
     if (!identifier.trim()) {
-      setError('يرجى إدخال البريد الإلكتروني');
+      setError('يرجى إدخال رقم الكشاف أو البريد الإلكتروني أو رقم الهاتف');
       return;
     }
 
@@ -56,53 +56,19 @@ function LoginFormContent() {
     setIsLoading(true);
     setError(null);
 
-    const supabase = createClient();
+    try {
+      const res = await loginScoutMemberAction({
+        identifier: identifier.trim(),
+        password,
+      });
 
-    if (supabase) {
-      try {
-        const { data: authData, error: authErr } = await supabase.auth.signInWithPassword({
-          email: identifier.trim(),
-          password,
-        });
-
-        if (authErr || !authData?.user) {
-          setError(getArabicErrorMessage(authErr?.message || ''));
-          setIsLoading(false);
-          return;
-        }
-
-        let destination = redirectPath;
-        if (redirectPath === '/dashboard') {
-          const { data: roleRows } = await supabase
-            .from('user_roles')
-            .select('role')
-            .eq('user_id', authData.user.id);
-          const roles = (roleRows ?? []).map((r: { role: string }) => r.role);
-          if (roles.includes('super_admin')) {
-            destination = '/super-admin';
-          } else if (
-            roles.includes('section_leader') ||
-            roles.includes('assistant_leader') ||
-            roles.includes('admin') ||
-            roles.includes('attendance_leader')
-          ) {
-            destination = '/leader';
-          } else {
-            destination = '/dashboard';
-          }
-        }
-
-        router.push(destination);
-        router.refresh();
-      } catch (err: any) {
-        setError(getArabicErrorMessage(err?.message || ''));
-        setIsLoading(false);
-      }
-    } else {
-      setTimeout(() => {
-        setIsLoading(false);
-        router.push(redirectPath);
-      }, 500);
+      const destination = redirectPath !== '/dashboard' ? redirectPath : res.redirectUrl || '/dashboard';
+      router.push(destination);
+      router.refresh();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'تعذر تسجيل الدخول. يرجى التحقق من بياناتك والمحاولة مرة أخرى.';
+      setError(msg);
+      setIsLoading(false);
     }
   };
 
@@ -146,19 +112,23 @@ function LoginFormContent() {
 
             <div>
               <label className="block text-xs font-bold text-charcoal/80 mb-1">
-                البريد الإلكتروني المعتمد *
+                رقم الكشاف أو البريد الإلكتروني أو الهاتف *
               </label>
               <div className="relative">
                 <input
-                  type="email"
+                  type="text"
                   required
                   value={identifier}
                   onChange={(e) => setIdentifier(e.target.value)}
-                  autoComplete="email"
-                  className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right"
+                  placeholder="SCT-2026-0001 أو 01xxxxxxxxx أو yourname@example.com"
+                  dir="auto"
+                  className="w-full px-4 py-2.5 rounded-xl border border-sand bg-cream/20 text-sm focus:border-emerald focus:ring-1 focus:ring-emerald outline-none text-right placeholder:text-charcoal/40 font-mono"
                 />
                 <User className="w-4 h-4 text-charcoal/40 absolute left-3 top-3.5" />
               </div>
+              <p className="text-[11px] text-emerald font-medium mt-1">
+                الكشافة يمكنهم تسجيل الدخول مباشرة برقم الكشاف وكلمة المرور دون الحاجة لبريد إلكتروني ⚜️
+              </p>
             </div>
 
             <div>

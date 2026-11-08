@@ -28,6 +28,21 @@ export interface RegisterOutput {
 }
 
 /**
+ * Normalizes phone numbers: handles Egyptian local 01xxxxxxxxx -> +201xxxxxxxxx
+ * and strips spaces, hyphens, and parentheses.
+ */
+export function normalizePhoneNumber(rawPhone: string): string {
+  const cleaned = rawPhone.replace(/[\s\-()]/g, '');
+  if (/^01[0125]\d{8}$/.test(cleaned)) {
+    return `+20${cleaned.substring(1)}`;
+  }
+  if (/^\+201[0125]\d{8}$/.test(cleaned)) {
+    return cleaned;
+  }
+  return cleaned;
+}
+
+/**
  * Public registration flow.
  *
  * In Supabase mode:
@@ -103,19 +118,25 @@ export async function registerScoutMember(input: RegisterInput): Promise<Registe
   }
 
   // Supabase Mode
-  if (!input.email || !input.password) {
-    throw new AppError('VALIDATION', 'البريد الإلكتروني وكلمة المرور مطلوبان لإنشاء الحساب.');
+  if (!input.password) {
+    throw new AppError('VALIDATION', 'كلمة المرور مطلوبة لإنشاء الحساب.');
   }
 
   if (input.password.length < 6) {
     throw new AppError('VALIDATION', 'كلمة المرور يجب أن تتكون من 6 أحرف على الأقل.');
   }
 
+  // If email is provided, validate; if not, generate a dedicated internal scout identifier
+  const effectiveEmail =
+    input.email && input.email.trim().length > 0
+      ? input.email.trim()
+      : `scout.${Date.now()}.${Math.floor(1000 + Math.random() * 9000)}@alfanar.internal`;
+
   const adminClient = createAdminClient();
 
   // 1. Create auth user
   const { data: authUser, error: authErr } = await adminClient.auth.admin.createUser({
-    email: input.email,
+    email: effectiveEmail,
     password: input.password,
     email_confirm: true,
     user_metadata: { full_name: trimmedName },

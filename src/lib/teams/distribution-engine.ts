@@ -1,9 +1,11 @@
 import { Profile, ScoutStageId } from '../../types';
+import { getSectionDisplayName } from '../sections/section-helper';
 
 export interface GeneratedTeam {
   tempId: string;
   name: string;
   stage_id?: ScoutStageId | null;
+  section_id?: string | null;
   color_hex: string;
   icon_name: string;
   members: Profile[];
@@ -28,25 +30,38 @@ export interface MixedDistributionConfig {
   teamCount: number;
   teamNames?: string[];
   seed?: string;
+  sectionId?: string;
 }
 
 export interface SeparateDistributionConfig {
-  stageTeamCounts: Record<ScoutStageId, number>;
-  stageTeamNames?: Partial<Record<ScoutStageId, string[]>>;
+  stageTeamCounts?: Partial<Record<string, number>>;
+  stageTeamNames?: Partial<Record<string, string[]>>;
+  sectionTeamCounts?: Record<string, number>;
   seed?: string;
 }
 
 // Scout Adventure Default Team Names & Colors
 export const DEFAULT_TEAM_TEMPLATES = [
-  { name: 'فريق النسور', icon: 'compass', color: '#173C32' },
-  { name: 'فريق الفهود', icon: 'zap', color: '#23836B' },
-  { name: 'فريق الذئاب', icon: 'shield', color: '#E89B50' },
-  { name: 'فريق الصقور', icon: 'wind', color: '#24342E' },
-  { name: 'فريق الأسود', icon: 'flame', color: '#B45309' },
-  { name: 'فريق الوعول', icon: 'mountain', color: '#047857' },
-  { name: 'فريق الفرسان', icon: 'sword', color: '#4338CA' },
-  { name: 'فريق النجوم', icon: 'star', color: '#D97706' },
+  { name: 'طليعة النسور', icon: 'compass', color: '#173C32' },
+  { name: 'طليعة الفهود', icon: 'zap', color: '#23836B' },
+  { name: 'طليعة الذئاب', icon: 'shield', color: '#E89B50' },
+  { name: 'طليعة الصقور', icon: 'wind', color: '#24342E' },
+  { name: 'طليعة الأسود', icon: 'flame', color: '#B45309' },
+  { name: 'طليعة الوعول', icon: 'mountain', color: '#047857' },
+  { name: 'طليعة الفرسان', icon: 'sword', color: '#4338CA' },
+  { name: 'طليعة النجوم', icon: 'star', color: '#D97706' },
 ];
+
+/**
+ * Identifies eligible scout members for team distribution:
+ * must be active, must NOT have administrative/leadership roles.
+ */
+export function isEligibleScout(m: Profile): boolean {
+  if (!m || !m.is_active) return false;
+  const staffRoles = ['super_admin', 'admin', 'section_leader', 'assistant_leader', 'attendance_leader'];
+  if (m.roles?.some((r) => staffRoles.includes(r))) return false;
+  return true;
+}
 
 /**
  * Deterministic Pseudo-Random Number Generator (Mulberry32)
@@ -79,8 +94,8 @@ function seededShuffle<T>(array: T[], rng: () => number): T[] {
 }
 
 /**
- * Generate Mixed-Stage Balanced Teams (Mode A)
- * Balances total team size, stage proportions, and commitment levels.
+ * Generate Mixed Balanced Teams (Mode A)
+ * Balances total team size, section/stage proportions, and commitment levels.
  */
 export function generateMixedStageTeams(
   members: Profile[],
@@ -88,9 +103,17 @@ export function generateMixedStageTeams(
 ): DistributionResult {
   const seed = config.seed || Math.random().toString(36).substring(2, 10);
   const rng = createSeededRandom(seed);
-  const teamCount = Math.max(1, config.teamCount);
 
-  if (members.length === 0) {
+  // Filter only valid active scout members
+  const uniqueMembersMap = new Map<string, Profile>();
+  for (const m of members) {
+    if (m && m.id && !uniqueMembersMap.has(m.id)) {
+      uniqueMembersMap.set(m.id, m);
+    }
+  }
+  const uniqueMembers = Array.from(uniqueMembersMap.values());
+
+  if (uniqueMembers.length === 0) {
     return {
       seed,
       mode: 'mixed_stages',
@@ -101,19 +124,14 @@ export function generateMixedStageTeams(
         assignedCount: 0,
         unassignedCount: 0,
         teamCount: 0,
-        imbalanceReport: 'لا يوجد أعضاء مؤهلين للتوزيع',
+        imbalanceReport: 'لا يوجد أعضاء كشافة مؤهلين للتوزيع',
       },
     };
   }
 
-  // Deduplicate members by id
-  const uniqueMembersMap = new Map<string, Profile>();
-  for (const m of members) {
-    if (!uniqueMembersMap.has(m.id)) {
-      uniqueMembersMap.set(m.id, m);
-    }
-  }
-  const uniqueMembers = Array.from(uniqueMembersMap.values());
+  // Adjust team count: cannot have more teams than members
+  const desiredCount = Math.max(1, config.teamCount || 2);
+  const teamCount = Math.min(desiredCount, uniqueMembers.length);
 
   // Initialize Teams
   const teams: GeneratedTeam[] = [];
@@ -124,33 +142,30 @@ export function generateMixedStageTeams(
       tempId: `team_mixed_${i + 1}`,
       name: customName?.trim() || `${template.name} ${i >= DEFAULT_TEAM_TEMPLATES.length ? i + 1 : ''}`.trim(),
       stage_id: null,
+      section_id: config.sectionId || null,
       color_hex: template.color,
       icon_name: template.icon,
       members: [],
     });
   }
 
-  // Stratify members by: stage_id + commitment
-  // This guarantees each stage and commitment status is evenly distributed across all teams
+  // Stratify members by: section/stage + commitment
   const strataMap = new Map<string, Profile[]>();
   for (const member of uniqueMembers) {
-    const key = `${member.stage_id || 'unknown'}__${member.initial_commitment || 'committed'}`;
+    const scopeKey = member.section_id || member.stage_id || 'general';
+    const key = `${scopeKey}__${member.initial_commitment || 'committed'}`;
     if (!strataMap.has(key)) {
       strataMap.set(key, []);
     }
     strataMap.get(key)!.push(member);
   }
 
-  // Round-robin distribution pointer to avoid bias toward team 0
   let teamPointer = 0;
-
-  // Process strata ordered by stage priority to evenly weave them
   const sortedKeys = Array.from(strataMap.keys()).sort();
 
   for (const key of sortedKeys) {
     const stratumMembers = seededShuffle(strataMap.get(key)!, rng);
     for (const member of stratumMembers) {
-      // Find the team with the minimum current members to minimize size variance
       let targetTeamIndex = teamPointer % teamCount;
       let minSize = teams[targetTeamIndex].members.length;
 
@@ -167,7 +182,7 @@ export function generateMixedStageTeams(
     }
   }
 
-  // Auto-select patrol leader if not set (preferring stage_3 or committed)
+  // Auto-select patrol leader if not set
   for (const team of teams) {
     if (team.members.length > 0) {
       const leaderCandidate =
@@ -185,7 +200,7 @@ export function generateMixedStageTeams(
   const diff = maxTeamSize - minTeamSize;
   const imbalanceReport =
     diff > 1
-      ? `فرق طفيف في عدد الأعضاء (${diff} أعضاء) بسبب عدم قابلية العدد الكلي للقسمة بالتساوي.`
+      ? `توزيع متوازن مع فرق طفيف (${diff} أعضاء) بسبب عدم قابلية العدد الكلي للقسمة بالتساوي.`
       : undefined;
 
   return {
@@ -204,8 +219,8 @@ export function generateMixedStageTeams(
 }
 
 /**
- * Generate Stage-Separated Teams (Mode B)
- * Each scout stage generates teams completely independently.
+ * Generate Section/Stage-Separated Teams (Mode B)
+ * Groups members by section or stage and distributes them cleanly.
  */
 export function generateSeparateStageTeams(
   members: Profile[],
@@ -217,57 +232,86 @@ export function generateSeparateStageTeams(
   // Deduplicate
   const uniqueMembersMap = new Map<string, Profile>();
   for (const m of members) {
-    if (!uniqueMembersMap.has(m.id)) {
+    if (m && m.id && !uniqueMembersMap.has(m.id)) {
       uniqueMembersMap.set(m.id, m);
     }
   }
   const uniqueMembers = Array.from(uniqueMembersMap.values());
 
-  const stages: ScoutStageId[] = ['stage_1', 'stage_2', 'stage_3'];
-  const stageLabels: Record<ScoutStageId, string> = {
-    stage_1: 'الأشبال',
-    stage_2: 'الفتيان',
-    stage_3: 'المتقدم',
-  };
+  if (uniqueMembers.length === 0) {
+    return {
+      seed,
+      mode: 'separate_stages',
+      teams: [],
+      unassignedMembers: [],
+      statistics: {
+        totalMembers: 0,
+        assignedCount: 0,
+        unassignedCount: 0,
+        teamCount: 0,
+        imbalanceReport: 'لا يوجد أعضاء كشافة مؤهلين للتوزيع',
+      },
+    };
+  }
+
+  // Group members by section_id or stage_id
+  const groupsMap = new Map<string, { label: string; stageId?: ScoutStageId | null; sectionId?: string | null; members: Profile[] }>();
+
+  for (const member of uniqueMembers) {
+    const key = member.section_id || member.stage_id || 'unassigned';
+    if (!groupsMap.has(key)) {
+      const label = getSectionDisplayName(member, 'القسم العام');
+      groupsMap.set(key, {
+        label,
+        stageId: member.stage_id || null,
+        sectionId: member.section_id || null,
+        members: [],
+      });
+    }
+    groupsMap.get(key)!.members.push(member);
+  }
 
   const allTeams: GeneratedTeam[] = [];
   const unassigned: Profile[] = [];
 
-  for (const stage of stages) {
-    const stageMembers = uniqueMembers.filter((m) => m.stage_id === stage);
-    const requestedCount = config.stageTeamCounts[stage] || 0;
+  for (const [groupKey, group] of groupsMap.entries()) {
+    const countBySection = config.sectionTeamCounts?.[groupKey];
+    const countByStage = config.stageTeamCounts?.[groupKey];
+    const requestedCount = countBySection ?? countByStage ?? (group.members.length >= 4 ? 2 : 1);
 
-    if (requestedCount <= 0 || stageMembers.length === 0) {
-      if (stageMembers.length > 0 && requestedCount <= 0) {
-        unassigned.push(...stageMembers);
+    if (requestedCount <= 0 || group.members.length === 0) {
+      if (group.members.length > 0) {
+        unassigned.push(...group.members);
       }
       continue;
     }
 
-    const shuffled = seededShuffle(stageMembers, rng);
-    const stageTeams: GeneratedTeam[] = [];
+    const effectiveTeamCount = Math.min(requestedCount, group.members.length);
+    const shuffled = seededShuffle(group.members, rng);
+    const groupTeams: GeneratedTeam[] = [];
 
-    for (let i = 0; i < requestedCount; i++) {
-      const template = DEFAULT_TEAM_TEMPLATES[i % DEFAULT_TEAM_TEMPLATES.length];
-      const customName = config.stageTeamNames?.[stage]?.[i];
-      stageTeams.push({
-        tempId: `team_${stage}_${i + 1}`,
-        name: customName?.trim() || `${template.name} (${stageLabels[stage]})`,
-        stage_id: stage,
+    for (let i = 0; i < effectiveTeamCount; i++) {
+      const template = DEFAULT_TEAM_TEMPLATES[(allTeams.length + i) % DEFAULT_TEAM_TEMPLATES.length];
+      const customName = config.stageTeamNames?.[groupKey]?.[i];
+      groupTeams.push({
+        tempId: `team_${groupKey}_${i + 1}`,
+        name: customName?.trim() || `${template.name} (${group.label})`,
+        stage_id: group.stageId,
+        section_id: group.sectionId,
         color_hex: template.color,
         icon_name: template.icon,
         members: [],
       });
     }
 
-    // Distribute among stage teams
+    // Distribute among group teams
     for (let i = 0; i < shuffled.length; i++) {
-      const targetTeamIndex = i % requestedCount;
-      stageTeams[targetTeamIndex].members.push(shuffled[i]);
+      const targetTeamIndex = i % effectiveTeamCount;
+      groupTeams[targetTeamIndex].members.push(shuffled[i]);
     }
 
     // Assign leader
-    for (const team of stageTeams) {
+    for (const team of groupTeams) {
       if (team.members.length > 0) {
         const leader =
           team.members.find((m) => m.initial_commitment === 'committed') ||
@@ -276,15 +320,7 @@ export function generateSeparateStageTeams(
       }
     }
 
-    allTeams.push(...stageTeams);
-  }
-
-  // Handle members with unassigned stages
-  const knownStageMembers = new Set(allTeams.flatMap((t) => t.members.map((m) => m.id)));
-  for (const m of uniqueMembers) {
-    if (!knownStageMembers.has(m.id)) {
-      unassigned.push(m);
-    }
+    allTeams.push(...groupTeams);
   }
 
   return {
@@ -299,7 +335,7 @@ export function generateSeparateStageTeams(
       teamCount: allTeams.length,
       imbalanceReport:
         unassigned.length > 0
-          ? `يوجد ${unassigned.length} عضو لم يتم تخصيص مرحلة كشفية لهم أو لم يتم تحديد فرق لمرحلتهم.`
+          ? `يوجد ${unassigned.length} عضو لم تخصص لهم فرق في التوزيع الحالي.`
           : undefined,
     },
   };

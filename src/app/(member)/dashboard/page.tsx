@@ -21,6 +21,7 @@ import { submitWeeklyResponseAction, getDashboardDataAction } from '@/app/action
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { getFullScoutScopeDisplay } from '@/lib/sections/section-helper';
 
 export default function MemberDashboardPage() {
   const [member, setMember] = useState<Profile | null>(null);
@@ -57,11 +58,7 @@ export default function MemberDashboardPage() {
     );
   }
 
-  const stageNames: Record<string, string> = {
-    stage_1: 'الأشبال والزهرات',
-    stage_2: 'الفتيان والمرشدات',
-    stage_3: 'المتقدم والرائدات',
-  };
+
 
   return (
     <div className="min-h-screen flex flex-col bg-cream text-charcoal pb-24 md:pb-12">
@@ -90,9 +87,8 @@ export default function MemberDashboardPage() {
             </h1>
 
             <p className="text-xs sm:text-sm text-sand leading-relaxed">
-              رقم قيدك الكشفي: <strong className="font-mono text-white">{member.member_number}</strong> — قسم{' '}
-              <strong>{member.section?.name || stageNames[member.stage_id] || 'الكشافة'}</strong>
-              {member.year?.name && <span> ({member.year.name})</span>}
+              رقم قيدك الكشفي: <strong className="font-mono text-white">{member.member_number}</strong> — النطاق:{' '}
+              <strong className="text-white">{getFullScoutScopeDisplay(member)}</strong>
             </p>
 
             <div className="pt-2 flex items-center gap-2 flex-wrap">

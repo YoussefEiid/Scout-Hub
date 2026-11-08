@@ -6,6 +6,7 @@ import { Users, Crown, Compass, Sparkles } from 'lucide-react';
 import { Team, Profile } from '@/types';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { getFullScoutScopeDisplay, getSectionDisplayName } from '@/lib/sections/section-helper';
 
 interface TeamRosterCardProps {
   team: Team | null;
@@ -43,11 +44,6 @@ export function TeamRosterCard({ team, currentMemberId, isNewlyRevealed = false 
     );
   }
 
-  const stageLabels: Record<string, string> = {
-    stage_1: 'أشبال',
-    stage_2: 'فتيان',
-    stage_3: 'متقدم',
-  };
 
   const members = team.memberships?.map((m) => m.member).filter(Boolean) as Profile[] || [];
 
@@ -82,7 +78,7 @@ export function TeamRosterCard({ team, currentMemberId, isNewlyRevealed = false 
           </div>
           {team.stage_id && (
             <span className="bg-black/20 px-2.5 py-1 rounded-full text-[11px]">
-              {stageLabels[team.stage_id] || team.stage_id}
+              {getSectionDisplayName({ stage_id: team.stage_id as any })}
             </span>
           )}
         </div>
@@ -125,7 +121,7 @@ export function TeamRosterCard({ team, currentMemberId, isNewlyRevealed = false 
                         )}
                       </div>
                       <span className="text-[11px] text-charcoal/60">
-                        {stageLabels[m.stage_id] || 'كشاف'}
+                        {getFullScoutScopeDisplay(m)}
                       </span>
                     </div>
                   </div>

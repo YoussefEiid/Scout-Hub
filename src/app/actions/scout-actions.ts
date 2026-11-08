@@ -18,7 +18,9 @@ import {
   LEADER_ROLES,
   STAFF_ROLES,
   ANY_ROLE,
+  getDefaultRedirectForRole,
 } from '@/lib/auth/auth-service';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 import { registerScoutMember, RegisterInput } from '@/lib/auth/registration';
 import { createAdminClient } from '@/lib/supabase/admin';
 import { getBackendMode } from '@/lib/config/runtime';
@@ -26,6 +28,7 @@ import { ScoutStore } from '@/lib/data/scout-store';
 import {
   listMembers,
   getProfile,
+  getUserRoles,
   updateProfile,
   listScoutSections,
   listActiveScoutSections,
@@ -65,7 +68,9 @@ import {
 import {
   generateMixedStageTeams,
   generateSeparateStageTeams,
+  isEligibleScout,
 } from '@/lib/teams/distribution-engine';
+import { normalizePhoneNumber } from '@/lib/auth/registration';
 import type {
   AttendanceRecord,
   DistributionMode,
@@ -263,26 +268,43 @@ export async function registerMemberAction(data: RegisterInput) {
 
 /**
  * Server Action: Generate balanced teams (Mode A / Mode B).
- * Restricted to Administrators.
+ * Accessible to Administrators and Section Leaders.
  */
 export async function generateTeamDistributionAction(params: {
   title: string;
   mode: DistributionMode;
-  mixedConfig?: { teamCount: number; teamNames?: string[] };
-  separateConfig?: { stageTeamCounts: Record<ScoutStageId, number> };
+  mixedConfig?: { teamCount: number; teamNames?: string[]; sectionId?: string };
+  separateConfig?: {
+    stageTeamCounts?: Record<ScoutStageId, number>;
+    sectionTeamCounts?: Record<string, number>;
+  };
+  sectionId?: string;
   seed?: string;
 }) {
-  const ctx = await requireSession(ADMIN_ROLES);
+  const ctx = await requireSession(LEADER_ROLES);
   const seed = params.seed || Math.random().toString(36).substring(2, 9);
+  const effectiveSectionId = params.sectionId || params.mixedConfig?.sectionId;
 
   if (ctx.mode === 'demo') {
-    const allMembers = ScoutStore.getAllMembers().filter((m) => m.is_active);
+    let allMembers = ScoutStore.getAllMembers().filter(isEligibleScout);
+    if (effectiveSectionId) {
+      allMembers = allMembers.filter((m) => m.section_id === effectiveSectionId);
+    }
+
+    if (allMembers.length === 0) {
+      throw new AppError(
+        'VALIDATION',
+        'لا يوجد أعضاء كشافة مؤهلين للتوزيع حالياً (يجب أن يكون الكشاف نشطاً ولا يحمل رتبة قائد أو إداري).'
+      );
+    }
+
     const distId = `dist-${Date.now()}`;
     let result;
     if (params.mode === 'mixed_stages') {
       result = generateMixedStageTeams(allMembers, {
         teamCount: params.mixedConfig?.teamCount || 4,
         teamNames: params.mixedConfig?.teamNames,
+        sectionId: effectiveSectionId,
         seed,
       });
     } else {
@@ -292,6 +314,7 @@ export async function generateTeamDistributionAction(params: {
           stage_2: 2,
           stage_3: 2,
         },
+        sectionTeamCounts: params.separateConfig?.sectionTeamCounts,
         seed,
       });
     }
@@ -301,6 +324,7 @@ export async function generateTeamDistributionAction(params: {
       distribution_id: distId,
       name: t.name,
       stage_id: t.stage_id,
+      section_id: t.section_id || effectiveSectionId,
       leader_id: t.leaderId,
       color_hex: t.color_hex,
       icon_name: t.icon_name,
@@ -324,6 +348,7 @@ export async function generateTeamDistributionAction(params: {
       status: 'draft',
       version_number: 1,
       random_seed: seed,
+      section_id: effectiveSectionId,
       is_current_published: false,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -335,28 +360,54 @@ export async function generateTeamDistributionAction(params: {
   }
 
   // Supabase Mode
-  const allMembers = (await listMembers(ctx.client!)).filter((m) => m.is_active);
+  const rawMembers = await listMembers(ctx.client!);
+  let eligible = rawMembers.filter(isEligibleScout);
+
+  if (effectiveSectionId) {
+    eligible = eligible.filter((m) => m.section_id === effectiveSectionId);
+  } else if (!ctx.roles.includes('super_admin') && !ctx.roles.includes('admin')) {
+    const scopes = ctx.scopes || (await getStaffScopeAssignments(ctx.client!, ctx.userId));
+    const allowedSectionIds = scopes.map((s) => s.section_id);
+    if (allowedSectionIds.length > 0) {
+      eligible = eligible.filter((m) => m.section_id && allowedSectionIds.includes(m.section_id));
+    }
+  }
+
+  if (eligible.length === 0) {
+    throw new AppError(
+      'VALIDATION',
+      'لا يوجد أعضاء كشافة مؤهلين للتوزيع حالياً في النطاق المحدد (يجب أن يكون الكشاف نشطاً ولا يحمل رتبة قائد أو إداري).'
+    );
+  }
+
   let result;
   if (params.mode === 'mixed_stages') {
-    result = generateMixedStageTeams(allMembers, {
+    result = generateMixedStageTeams(eligible, {
       teamCount: params.mixedConfig?.teamCount || 4,
       teamNames: params.mixedConfig?.teamNames,
+      sectionId: effectiveSectionId,
       seed,
     });
   } else {
-    result = generateSeparateStageTeams(allMembers, {
+    result = generateSeparateStageTeams(eligible, {
       stageTeamCounts: params.separateConfig?.stageTeamCounts || {
         stage_1: 2,
         stage_2: 2,
         stage_3: 2,
       },
+      sectionTeamCounts: params.separateConfig?.sectionTeamCounts,
       seed,
     });
+  }
+
+  if (!result.teams || result.teams.length === 0) {
+    throw new AppError('VALIDATION', 'تعذر تكوين طلائع كشفية من الأعضاء المحددين.');
   }
 
   const draftTeamsInput: DraftTeamInput[] = result.teams.map((t) => ({
     name: t.name,
     stage_id: t.stage_id || null,
+    section_id: t.section_id || effectiveSectionId || null,
     color_hex: t.color_hex,
     icon_name: t.icon_name,
     leader_id: t.leaderId || null,
@@ -368,6 +419,7 @@ export async function generateTeamDistributionAction(params: {
     mode: params.mode,
     seed,
     teams: draftTeamsInput,
+    sectionId: effectiveSectionId || null,
   });
 
   const savedDetail = await getDistributionDetail(ctx.client!, distId);
@@ -382,7 +434,7 @@ export async function generateTeamDistributionAction(params: {
  * Restricted to Administrators.
  */
 export async function publishTeamDistributionAction(distributionId: string) {
-  const ctx = await requireSession(ADMIN_ROLES);
+  const ctx = await requireSession(LEADER_ROLES);
 
   if (ctx.mode === 'demo') {
     const success = ScoutStore.publishTeamDistribution(distributionId);
@@ -407,7 +459,7 @@ export async function swapTeamMembersAction(params: {
   teamBId: string;
   memberBId: string;
 }) {
-  const ctx = await requireSession(ADMIN_ROLES);
+  const ctx = await requireSession(LEADER_ROLES);
 
   if (ctx.mode === 'demo') {
     const dist = ScoutStore.getTeamDistributions().find((d) => d.id === params.distributionId);
@@ -642,15 +694,26 @@ export async function getAdminScannerDataAction() {
  * Server Action: Load Admin Team Distribution Data.
  */
 export async function getAdminTeamsDataAction() {
-  const ctx = await requireSession(ADMIN_ROLES);
+  const ctx = await requireSession(LEADER_ROLES);
 
   if (ctx.mode === 'demo') {
     const list = ScoutStore.getTeamDistributions();
     const pub = ScoutStore.getCurrentPublishedDistribution() || list[0] || null;
+    const all = ScoutStore.getAllMembers();
+    const eligible = all.filter(isEligibleScout);
 
     return {
       distributions: list,
       activeDistribution: pub,
+      metrics: {
+        totalMembers: all.length,
+        activeMembers: all.filter((m) => m.is_active).length,
+        eligibleMembers: eligible.length,
+        pendingSectionMembers: eligible.filter((m) => !m.section_id).length,
+        excludedMembers: all.length - eligible.length,
+        teamCount: pub?.teams?.length || 0,
+      },
+      sections: await getActiveScoutSectionsAction(),
       isLiveSupabase: false,
     };
   }
@@ -662,9 +725,22 @@ export async function getAdminTeamsDataAction() {
     activeDistribution = await getDistributionDetail(ctx.client!, publishedHeader.id);
   }
 
+  const allRawMembers = await listMembers(ctx.client!);
+  const eligible = allRawMembers.filter(isEligibleScout);
+  const sections = await listActiveScoutSections(ctx.client!);
+
   return {
     distributions: dists,
     activeDistribution,
+    metrics: {
+      totalMembers: allRawMembers.length,
+      activeMembers: allRawMembers.filter((m) => m.is_active).length,
+      eligibleMembers: eligible.length,
+      pendingSectionMembers: eligible.filter((m) => !m.section_id).length,
+      excludedMembers: allRawMembers.length - eligible.length,
+      teamCount: activeDistribution?.teams?.length || 0,
+    },
+    sections,
     isLiveSupabase: true,
   };
 }
@@ -705,15 +781,18 @@ export async function getAdminReportsDataAction(sessionId?: string) {
  */
 export async function getAdminMembersDataAction() {
   const ctx = await requireSession(ADMIN_ROLES);
+  const sections = await getActiveScoutSectionsAction();
 
   if (ctx.mode === 'demo') {
     const members = ScoutStore.getAllMembers();
-    return { members, isLiveSupabase: false };
+    return { members, sections, isLiveSupabase: false };
   }
 
   const members = await listMembers(ctx.client!);
-  return { members, isLiveSupabase: true };
+  return { members, sections, isLiveSupabase: true };
 }
+
+export const getSuperAdminMembersAction = getAdminMembersDataAction;
 
 // ============================================================================
 // DYNAMIC SCOUT SECTIONS & YEARS ACTIONS
@@ -1464,7 +1543,7 @@ export async function toggleMemberActiveAction(memberId: string, isActive: boole
   return { success: true, isActive: res.isActive };
 }
 
-export async function deleteMemberPermanentAction(memberId: string) {
+export async function deleteMemberPermanentAction(memberId: string, confirmationNumber?: string) {
   const ctx = await requireSession(SUPER_ADMIN_ROLES);
 
   if (memberId === ctx.userId) {
@@ -1477,6 +1556,30 @@ export async function deleteMemberPermanentAction(memberId: string) {
     return { success: true, deletedMemberId: memberId };
   }
 
+  const adminClient = createAdminClient();
+
+  // Retrieve target member
+  const { data: targetProfile } = await adminClient
+    .from('profiles')
+    .select('id, full_name, member_number, avatar_url, user_roles(role)')
+    .eq('id', memberId)
+    .maybeSingle();
+
+  if (!targetProfile) {
+    throw new AppError('NOT_FOUND', 'الكشاف المطلوب غير موجود في النظام.');
+  }
+
+  // Validate confirmation number if provided
+  if (confirmationNumber && confirmationNumber.trim() !== targetProfile.member_number.trim()) {
+    throw new AppError('VALIDATION', 'رقم القيد المدخل للتأكيد غير مطابق لرقم الكشاف.');
+  }
+
+  // Prevent deleting other super admins or admins
+  const roles = targetProfile.user_roles?.map((r: { role: string }) => r.role) || [];
+  if (roles.includes('super_admin')) {
+    throw new AppError('FORBIDDEN', 'غير مصرح بحذف حساب مسؤول نظام عام.');
+  }
+
   const res = await deleteMemberPermanent(ctx.client!, memberId);
   if (!res.success) {
     const errorMap: Record<string, string> = {
@@ -1487,7 +1590,165 @@ export async function deleteMemberPermanentAction(memberId: string) {
     throw new AppError('INTERNAL', errorMap[res.error || ''] || 'تعذر حذف الكشاف نهائياً.');
   }
 
+  // Delete Supabase Auth user
+  try {
+    await adminClient.auth.admin.deleteUser(memberId);
+  } catch (authErr) {
+    console.error('Failed to delete auth user during member deletion:', authErr);
+  }
+
+  // Delete avatar file from Storage if applicable
+  if (targetProfile.avatar_url && targetProfile.avatar_url.includes('/avatars/')) {
+    try {
+      const parts = targetProfile.avatar_url.split('/avatars/');
+      if (parts[1]) {
+        await adminClient.storage.from('avatars').remove([parts[1]]);
+      }
+    } catch {}
+  }
+
   safeRevalidate('/super-admin/members');
+  safeRevalidate('/leader/members');
+  safeRevalidate('/super-admin/teams');
+  safeRevalidate('/leader/teams');
+
   return { success: true, deletedMemberId: res.deletedMemberId };
+}
+
+// ============================================================================
+// MEMBER AUTHENTICATION & IDENTITY HELPERS (CHILD-FRIENDLY LOGIN)
+// ============================================================================
+
+/**
+ * Server Action: Child-Friendly Scout Login.
+ * Supports:
+ *  - Scout ID (SCT-2026-XXXX) + Password
+ *  - Phone number + Password (E.164 / Egyptian +20)
+ *  - Standard Email + Password (for staff)
+ */
+export async function loginScoutMemberAction(params: {
+  identifier: string;
+  password: string;
+}) {
+  const trimmed = params.identifier?.trim();
+  if (!trimmed) {
+    throw new AppError('VALIDATION', 'يرجى إدخال رقم الكشاف أو البريد أو رقم الهاتف.');
+  }
+  if (!params.password) {
+    throw new AppError('VALIDATION', 'يرجى إدخال كلمة المرور.');
+  }
+
+  const client = await createServerSupabaseClient();
+  const adminClient = createAdminClient();
+
+  let targetEmail = trimmed;
+
+  // Check if identifier is not an email
+  if (!trimmed.includes('@')) {
+    // 1. Try finding by member_number (e.g. SCT-2026-0001, LDR-2026-..., ADMIN-...)
+    const { data: memberByNumber } = await adminClient
+      .from('profiles')
+      .select('id, member_number')
+      .ilike('member_number', trimmed)
+      .maybeSingle();
+
+    let targetUserId = memberByNumber?.id;
+
+    // 2. If not found by member_number, try finding by phone number
+    if (!targetUserId) {
+      const normalizedPhone = normalizePhoneNumber(trimmed);
+      const { data: memberByPhone } = await adminClient
+        .from('profiles')
+        .select('id, phone')
+        .or(`phone.eq.${trimmed},phone.eq.${normalizedPhone}`)
+        .maybeSingle();
+
+      targetUserId = memberByPhone?.id;
+    }
+
+    if (!targetUserId) {
+      throw new AppError(
+        'NOT_FOUND',
+        'لم يتم العثور على حساب مرتبط برقم الكشاف أو الهاتف المدخل. يرجى التأكد من البيانات أو التسجيل.'
+      );
+    }
+
+    // Retrieve auth email for target user
+    const { data: authUserData, error: authUserErr } = await adminClient.auth.admin.getUserById(targetUserId);
+    if (authUserErr || !authUserData?.user?.email) {
+      throw new AppError('INTERNAL', 'تعذر استرداد بيانات الحساب الأمني المرتبط بالكشاف.');
+    }
+    targetEmail = authUserData.user.email;
+  }
+
+  // Attempt authentication with resolved email & password
+  const { data: authData, error: authErr } = await client.auth.signInWithPassword({
+    email: targetEmail,
+    password: params.password,
+  });
+
+  if (authErr || !authData?.user) {
+    const msg = authErr?.message?.toLowerCase() || '';
+    if (msg.includes('invalid') || msg.includes('credentials')) {
+      throw new AppError('UNAUTHENTICATED', 'بيانات الدخول أو كلمة المرور غير صحيحة.');
+    }
+    if (msg.includes('rate') || msg.includes('too many')) {
+      throw new AppError('UNAUTHENTICATED', 'تم تجاوز عدد محاولات الدخول. يرجى الانتظار قليلاً.');
+    }
+    throw new AppError('UNAUTHENTICATED', 'تعذر تسجيل الدخول، يرجى التأكد من صحة كلمة المرور.');
+  }
+
+  // Determine redirect URL
+  const roles = await getUserRoles(client, authData.user.id);
+  const redirectUrl = getDefaultRedirectForRole(roles);
+
+  return {
+    success: true,
+    redirectUrl,
+    userId: authData.user.id,
+    roles,
+  };
+}
+
+/**
+ * Server Action: Reset scout password by Leader or Super Admin.
+ * Used for child accounts without email access.
+ */
+export async function resetScoutPasswordAction(params: {
+  memberId: string;
+  newPassword?: string;
+}) {
+  const ctx = await requireSession(LEADER_ROLES);
+  const adminClient = createAdminClient();
+
+  // Verify target member is not a super_admin or staff unless caller is super_admin
+  const targetRoles = await getUserRoles(adminClient, params.memberId);
+  if (targetRoles.includes('super_admin') && !ctx.roles.includes('super_admin')) {
+    throw new AppError('FORBIDDEN', 'لا يمكن إعادة تعيين كلمة مرور مسؤول عام.');
+  }
+
+  const generatedPassword = params.newPassword || `Scout@${Math.floor(100000 + Math.random() * 900000)}`;
+
+  const { error } = await adminClient.auth.admin.updateUserById(params.memberId, {
+    password: generatedPassword,
+  });
+
+  if (error) {
+    throw new AppError('INTERNAL', 'تعذر إعادة تعيين كلمة المرور: ' + error.message);
+  }
+
+  // Audit without storing plain password in details
+  await adminClient.from('audit_logs').insert({
+    actor_id: ctx.userId,
+    action: 'MEMBER_PASSWORD_RESET',
+    entity_type: 'profiles',
+    entity_id: params.memberId,
+    details: { reset_by_role: ctx.roles[0] },
+  });
+
+  return {
+    success: true,
+    newPassword: generatedPassword,
+  };
 }
 

@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect } from 'react';
 import Image from 'next/image';
-import { Shield, RefreshCw, Printer, Compass, CheckCircle2 } from 'lucide-react';
+import { Shield, RefreshCw, Printer, CheckCircle2 } from 'lucide-react';
 import { siteBranding } from '@/config/branding';
+import { getFullScoutScopeDisplay } from '@/lib/sections/section-helper';
 import { Profile } from '@/types';
 import { formatQRPayload, generateQRCodeDataURL } from '@/lib/qr/qr-service';
 import { Button } from '@/components/ui/Button';
@@ -55,11 +56,7 @@ export function ScoutCard({ member, qrToken, onRotateToken, canRotate = true }: 
     window.print();
   };
 
-  const stageNames: Record<string, string> = {
-    stage_1: 'المرحلة الأولى (الأشبال)',
-    stage_2: 'المرحلة الثانية (الفتيان)',
-    stage_3: 'المرحلة الثالثة (المتقدم)',
-  };
+  const scopeDisplay = getFullScoutScopeDisplay(member);
 
   return (
     <div className="flex flex-col items-center w-full max-w-sm mx-auto">
@@ -95,8 +92,8 @@ export function ScoutCard({ member, qrToken, onRotateToken, canRotate = true }: 
         <div className="text-center my-3 relative z-10">
           <h2 className="text-xl font-extrabold text-white tracking-tight">{member.full_name}</h2>
           <div className="mt-1 flex items-center justify-center gap-2 flex-wrap">
-            <span className="text-xs bg-emerald/30 text-emerald-light px-2.5 py-0.5 rounded-full border border-emerald/40 font-semibold">
-              {stageNames[member.stage_id] || 'كشافة'}
+            <span className="text-xs bg-emerald/30 text-emerald-light px-2.5 py-0.5 rounded-full border border-emerald/40 font-semibold" title="القسم أو المستوى الكشفي">
+              {scopeDisplay}
             </span>
             {member.active_team && (
               <span className="text-xs bg-orange/20 text-orange px-2.5 py-0.5 rounded-full border border-orange/40 font-bold flex items-center gap-1">

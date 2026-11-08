@@ -224,16 +224,7 @@ describe('Live Supabase Production E2E Verification', () => {
   });
 
   it('6. Friday Session constraints and Cairo time attendance tracking', async () => {
-    // 1. Rejects non-Friday date (2026-11-10 is Tuesday)
-    const { error: nonFridayErr } = await adminAuthClient.from('friday_sessions').insert({
-      session_date: '2026-11-10',
-      title: 'اجتماع ثلاثاء غير صالح',
-      start_time: '14:00:00',
-      late_threshold_time: '14:30:00',
-      created_by: adminUserId,
-    });
-    assert.ok(nonFridayErr, 'Non-Friday session must be rejected by check constraint chk_session_is_friday');
-
+    // 1. In Migration 004, chk_session_is_friday was relaxed so activities/camps can occur on other days.
     // 2. Accepts valid Friday date (2026-11-06 is Friday)
     const { data: sessionData, error: sessionErr } = await adminAuthClient
       .from('friday_sessions')
