@@ -276,7 +276,8 @@ export const ScoutStore = {
   createFridaySession(session: Omit<FridaySession, 'id' | 'created_at'>): FridaySession {
     const newSession: FridaySession = {
       ...session,
-      id: `session-${session.session_date}`,
+      id: `session-${session.session_date}-${session.section_id || 'all'}`,
+      status: session.is_open_for_attendance ? 'open' : 'scheduled',
       created_at: new Date().toISOString(),
       stats: {
         attending_count: 0,
@@ -284,16 +285,70 @@ export const ScoutStore = {
         circumstances_count: 0,
         actual_attendance_count: 0,
         uniform_count: 0,
+        late_count: 0,
       },
     };
     state.fridaySessions.unshift(newSession);
     return newSession;
   },
 
+  updateFridaySession(sessionId: string, patch: Partial<FridaySession>): FridaySession | null {
+    const session = state.fridaySessions.find((s) => s.id === sessionId);
+    if (!session) return null;
+    Object.assign(session, patch);
+    if (patch.is_open_for_attendance !== undefined) {
+      session.status = patch.is_open_for_attendance ? 'open' : 'closed';
+    }
+    return session;
+  },
+
+  deleteFridaySession(sessionId: string): boolean {
+    const idx = state.fridaySessions.findIndex((s) => s.id === sessionId);
+    if (idx < 0) return false;
+    state.fridaySessions.splice(idx, 1);
+    return true;
+  },
+
+  deleteAttendanceRecord(recordId: string): boolean {
+    for (const [key, r] of state.attendanceRecords.entries()) {
+      if (r.id === recordId) {
+        state.attendanceRecords.delete(key);
+        return true;
+      }
+    }
+    return false;
+  },
+
+  updateAttendanceUniform(recordId: string, uniformStatus: UniformStatus): boolean {
+    for (const r of state.attendanceRecords.values()) {
+      if (r.id === recordId) {
+        r.uniform_status = uniformStatus;
+        return true;
+      }
+    }
+    return false;
+  },
+
+  toggleMemberActive(memberId: string, isActive: boolean): boolean {
+    const member = state.members.find((m) => m.id === memberId);
+    if (!member) return false;
+    member.is_active = isActive;
+    return true;
+  },
+
+  deleteMemberPermanent(memberId: string): boolean {
+    const idx = state.members.findIndex((m) => m.id === memberId);
+    if (idx < 0) return false;
+    state.members.splice(idx, 1);
+    state.memberToToken.delete(memberId);
+    return true;
+  },
+
   toggleSessionAttendanceOpen(sessionId: string, isOpen: boolean): boolean {
     const session = state.fridaySessions.find((s) => s.id === sessionId);
     if (!session) return false;
     session.is_open_for_attendance = isOpen;
+    session.status = isOpen ? 'open' : 'closed';
     return true;
   },
 

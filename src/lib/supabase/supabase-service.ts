@@ -1,9 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { mapDbError, AppError } from '@/lib/actions/result';
+import { mapDbError } from '@/lib/actions/result';
 import type {
   AttendanceRecord,
   FridaySession,
-  MemberSummary,
   Profile,
   ScoutSection,
   ScoutSectionYear,
@@ -381,10 +380,287 @@ export async function listSessions(client: SupabaseClient, sectionId?: string): 
 
   const { data, error } = await query;
   if (error) throw mapDbError(error);
-  return (data ?? []).map((row: any) => ({
-    ...row,
-    section: row.scout_sections,
-  })) as FridaySession[];
+
+  const sessionIds = (data ?? []).map((s: any) => s.id);
+  const attendanceMap: Record<string, { actual: number; uniform: number; late: number }> = {};
+  const responsesMap: Record<string, { attending: number; absent: number; circumstances: number }> = {};
+
+  if (sessionIds.length > 0) {
+    const { data: attData } = await client
+      .from('attendance_records')
+      .select('session_id, uniform_status, arrival_status')
+      .in('session_id', sessionIds);
+
+    (attData ?? []).forEach((r: any) => {
+      if (!attendanceMap[r.session_id]) {
+        attendanceMap[r.session_id] = { actual: 0, uniform: 0, late: 0 };
+      }
+      attendanceMap[r.session_id].actual++;
+      if (r.uniform_status === 'with_uniform') attendanceMap[r.session_id].uniform++;
+      if (r.arrival_status === 'late') attendanceMap[r.session_id].late++;
+    });
+
+    const { data: respData } = await client
+      .from('weekly_responses')
+      .select('session_id, response')
+      .in('session_id', sessionIds);
+
+    (respData ?? []).forEach((r: any) => {
+      if (!responsesMap[r.session_id]) {
+        responsesMap[r.session_id] = { attending: 0, absent: 0, circumstances: 0 };
+      }
+      if (r.response === 'attending') responsesMap[r.session_id].attending++;
+      else if (r.response === 'absent') responsesMap[r.session_id].absent++;
+      else if (r.response === 'circumstances') responsesMap[r.session_id].circumstances++;
+    });
+  }
+
+  return (data ?? []).map((row: any) => {
+    const att = attendanceMap[row.id] || { actual: 0, uniform: 0, late: 0 };
+    const resp = responsesMap[row.id] || { attending: 0, absent: 0, circumstances: 0 };
+    return {
+      ...row,
+      status: row.status || (row.is_open_for_attendance ? 'open' : 'scheduled'),
+      section: row.scout_sections,
+      year: row.scout_section_years,
+      stats: {
+        attending_count: resp.attending,
+        absent_count: resp.absent,
+        circumstances_count: resp.circumstances,
+        actual_attendance_count: att.actual,
+        uniform_count: att.uniform,
+        late_count: att.late,
+      },
+    };
+  }) as FridaySession[];
+}
+
+export async function createFridaySession(
+  client: SupabaseClient,
+  session: {
+    title: string;
+    session_date: string;
+    section_id?: string | null;
+    year_id?: string | null;
+    start_time?: string;
+    late_threshold_time?: string;
+    is_open_for_attendance?: boolean;
+    notes?: string | null;
+    created_by?: string | null;
+  }
+): Promise<FridaySession> {
+  const isOpen = Boolean(session.is_open_for_attendance);
+  const basePayload: any = {
+    title: session.title.trim(),
+    session_date: session.session_date,
+    section_id: session.section_id || null,
+    start_time: session.start_time || '08:30:00',
+    late_threshold_time: session.late_threshold_time || '08:45:00',
+    is_open_for_attendance: isOpen,
+    notes: session.notes?.trim() || null,
+    created_by: session.created_by || null,
+  };
+
+  let insertResult = await client
+    .from('friday_sessions')
+    .insert({
+      ...basePayload,
+      status: isOpen ? 'open' : 'scheduled',
+      year_id: session.year_id || null,
+    })
+    .select('*, scout_sections(*)')
+    .single();
+
+  if (insertResult.error && insertResult.error.message?.includes('does not exist')) {
+    insertResult = await client
+      .from('friday_sessions')
+      .insert(basePayload)
+      .select('*, scout_sections(*)')
+      .single();
+  }
+
+  if (insertResult.error) throw mapDbError(insertResult.error);
+  const data = insertResult.data;
+
+  return {
+    ...data,
+    status: data.status || (data.is_open_for_attendance ? 'open' : 'scheduled'),
+    section: data.scout_sections,
+    stats: {
+      attending_count: 0,
+      absent_count: 0,
+      circumstances_count: 0,
+      actual_attendance_count: 0,
+      uniform_count: 0,
+      late_count: 0,
+    },
+  } as FridaySession;
+}
+
+export async function updateFridaySession(
+  client: SupabaseClient,
+  sessionId: string,
+  patch: Partial<FridaySession>
+): Promise<FridaySession> {
+  const updateData: any = {};
+  if (patch.title !== undefined) updateData.title = patch.title;
+  if (patch.session_date !== undefined) updateData.session_date = patch.session_date;
+  if (patch.section_id !== undefined) updateData.section_id = patch.section_id;
+  if (patch.start_time !== undefined) updateData.start_time = patch.start_time;
+  if (patch.late_threshold_time !== undefined) updateData.late_threshold_time = patch.late_threshold_time;
+  if (patch.is_open_for_attendance !== undefined) {
+    updateData.is_open_for_attendance = patch.is_open_for_attendance;
+  }
+  if (patch.notes !== undefined) updateData.notes = patch.notes;
+
+  let updateResult = await client
+    .from('friday_sessions')
+    .update({
+      ...updateData,
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.year_id !== undefined ? { year_id: patch.year_id } : {}),
+    })
+    .eq('id', sessionId)
+    .select('*, scout_sections(*)')
+    .single();
+
+  if (updateResult.error && updateResult.error.message?.includes('does not exist')) {
+    updateResult = await client
+      .from('friday_sessions')
+      .update(updateData)
+      .eq('id', sessionId)
+      .select('*, scout_sections(*)')
+      .single();
+  }
+
+  if (updateResult.error) throw mapDbError(updateResult.error);
+  const data = updateResult.data;
+  return {
+    ...data,
+    status: data.status || (data.is_open_for_attendance ? 'open' : 'scheduled'),
+    section: data.scout_sections,
+  } as FridaySession;
+}
+
+export async function toggleSessionAttendance(
+  client: SupabaseClient,
+  sessionId: string,
+  isOpen: boolean
+): Promise<FridaySession> {
+  return updateFridaySession(client, sessionId, {
+    is_open_for_attendance: isOpen,
+    status: isOpen ? 'open' : 'closed',
+  });
+}
+
+export async function deleteFridaySession(
+  client: SupabaseClient,
+  sessionId: string
+): Promise<boolean> {
+  const { error } = await client
+    .from('friday_sessions')
+    .delete()
+    .eq('id', sessionId);
+  if (error) throw mapDbError(error);
+  return true;
+}
+
+export async function deleteAttendanceRecord(
+  client: SupabaseClient,
+  recordId: string,
+  reason?: string
+): Promise<{ success: boolean; recordId?: string; error?: string }> {
+  try {
+    const res = await callRpc<{ success: boolean; record_id?: string; code?: string }>(
+      client,
+      'delete_attendance_record',
+      {
+        p_record_id: recordId,
+        p_reason: reason ?? null,
+      }
+    );
+    if (res && res.success) {
+      return { success: true, recordId: res.record_id };
+    }
+  } catch {
+    // Graceful fallback to direct DELETE if RPC is not present
+    const { error } = await client.from('attendance_records').delete().eq('id', recordId);
+    if (!error) return { success: true, recordId };
+  }
+  return { success: false, error: 'FAILED_TO_DELETE_ATTENDANCE' };
+}
+
+export async function updateAttendanceUniform(
+  client: SupabaseClient,
+  recordId: string,
+  uniformStatus: UniformStatus
+): Promise<boolean> {
+  const { error } = await client
+    .from('attendance_records')
+    .update({ uniform_status: uniformStatus })
+    .eq('id', recordId);
+  if (error) throw mapDbError(error);
+  return true;
+}
+
+export async function toggleMemberActive(
+  client: SupabaseClient,
+  memberId: string,
+  isActive: boolean
+): Promise<{ success: boolean; isActive?: boolean; error?: string }> {
+  try {
+    const res = await callRpc<{ success: boolean; member_id?: string; is_active?: boolean; code?: string }>(
+      client,
+      'toggle_member_active',
+      {
+        p_member_id: memberId,
+        p_is_active: isActive,
+      }
+    );
+    if (res && res.success) {
+      return { success: true, isActive: res.is_active };
+    }
+    if (res && !res.success) {
+      return { success: false, error: res.code || 'FAILED_TO_TOGGLE_ACTIVE' };
+    }
+  } catch {
+    // Graceful fallback to direct UPDATE
+    const { error } = await client.from('profiles').update({ is_active: isActive }).eq('id', memberId);
+    if (!error) return { success: true, isActive };
+  }
+  return { success: false, error: 'FAILED_TO_TOGGLE_ACTIVE' };
+}
+
+export async function deleteMemberPermanent(
+  client: SupabaseClient,
+  memberId: string
+): Promise<{ success: boolean; deletedMemberId?: string; error?: string }> {
+  try {
+    const res = await callRpc<{ success: boolean; deleted_member_id?: string; code?: string }>(
+      client,
+      'delete_member_permanent',
+      {
+        p_member_id: memberId,
+      }
+    );
+    if (res && res.success) {
+      return { success: true, deletedMemberId: res.deleted_member_id };
+    }
+    if (res && !res.success) {
+      return { success: false, error: res.code || 'FAILED_TO_DELETE_MEMBER' };
+    }
+  } catch {
+    // Graceful fallback to cascading cleanup
+    try {
+      await client.from('team_memberships').delete().eq('member_id', memberId);
+      await client.from('attendance_records').delete().eq('member_id', memberId);
+      await client.from('qr_credentials').delete().eq('member_id', memberId);
+      await client.from('user_roles').delete().eq('user_id', memberId);
+      const { error } = await client.from('profiles').delete().eq('id', memberId);
+      if (!error) return { success: true, deletedMemberId: memberId };
+    } catch {}
+  }
+  return { success: false, error: 'FAILED_TO_DELETE_MEMBER' };
 }
 
 export async function listAttendance(client: SupabaseClient, sessionId: string): Promise<AttendanceRecord[]> {
@@ -621,6 +897,14 @@ export const SupabaseService = {
   revokeAndIssueNewQRToken: rotateQr,
   getUserRole: getUserRoles,
   getFridaySessions: listSessions,
+  createFridaySession,
+  updateFridaySession,
+  toggleSessionAttendance,
+  deleteFridaySession,
+  deleteAttendanceRecord,
+  updateAttendanceUniform,
+  toggleMemberActive,
+  deleteMemberPermanent,
   getAttendanceRecords: listAttendance,
   submitWeeklyResponse,
   getActiveQRToken: getOrCreateMyQr,

@@ -145,6 +145,8 @@ export interface TeamMembership {
   member?: Profile | MemberSummary;
 }
 
+export type MeetingStatus = 'scheduled' | 'open' | 'closed' | 'cancelled';
+
 export interface FridaySession {
   id: string;
   session_date: string; // YYYY-MM-DD
@@ -152,8 +154,11 @@ export interface FridaySession {
   start_time: string; // HH:MM:SS
   late_threshold_time: string; // HH:MM:SS
   is_open_for_attendance: boolean;
+  status?: MeetingStatus;
   section_id?: string | null;
   section?: ScoutSection;
+  year_id?: string | null;
+  year?: ScoutSectionYear;
   response_deadline?: string | null;
   notes?: string | null;
   created_at: string;
@@ -164,6 +169,8 @@ export interface FridaySession {
     circumstances_count: number;
     actual_attendance_count: number;
     uniform_count: number;
+    late_count?: number;
+    total_eligible_count?: number;
   };
 }
 

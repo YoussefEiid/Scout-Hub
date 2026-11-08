@@ -1,6 +1,14 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+
+function safeRevalidate(path: string) {
+  try {
+    revalidatePath(path);
+  } catch {
+    // In unit test runners, static generation store is not active
+  }
+}
 import { AppError } from '@/lib/actions/result';
 import {
   requireSession,
@@ -34,6 +42,14 @@ import {
   recordAttendance,
   listAttendance,
   listSessions,
+  createFridaySession,
+  updateFridaySession,
+  toggleSessionAttendance,
+  deleteFridaySession,
+  deleteAttendanceRecord,
+  updateAttendanceUniform,
+  toggleMemberActive,
+  deleteMemberPermanent,
   submitWeeklyResponse,
   getWeeklyResponse,
   saveTeamDraft,
@@ -53,6 +69,7 @@ import {
 import type {
   AttendanceRecord,
   DistributionMode,
+  FridaySession,
   Profile,
   ScoutSection,
   ScoutSectionYear,
@@ -573,20 +590,30 @@ export async function getAdminScannerDataAction() {
   const ctx = await requireSession(STAFF_ROLES);
 
   if (ctx.mode === 'demo') {
-    const activeSession = ScoutStore.getActiveFridaySession();
+    const allSessions = ScoutStore.getFridaySessions();
+    const openSessions = allSessions.filter((s) => s.is_open_for_attendance);
+    const scheduledSessions = allSessions.filter((s) => s.status === 'scheduled');
+    const activeSession = openSessions[0] || allSessions[0] || null;
     const allMembers = ScoutStore.getAllMembers();
     const records = activeSession ? ScoutStore.getAttendanceRecords(activeSession.id) : [];
 
     return {
       activeSession,
+      openSessions,
+      scheduledSessions,
+      allSessions,
       allMembers,
       attendanceCount: records.length,
+      isSuperAdmin: true,
+      isAdmin: true,
       isLiveSupabase: false,
     };
   }
 
   const sessions = await listSessions(ctx.client!);
-  const activeSession = sessions.find((s) => s.is_open_for_attendance) || sessions[0] || null;
+  const openSessions = sessions.filter((s) => s.is_open_for_attendance);
+  const scheduledSessions = sessions.filter((s) => s.status === 'scheduled');
+  const activeSession = openSessions[0] || sessions[0] || null;
   const members = await listMembers(ctx.client!);
 
   let count = 0;
@@ -595,10 +622,18 @@ export async function getAdminScannerDataAction() {
     count = records.length;
   }
 
+  const isSuperAdmin = ctx.roles.includes('super_admin');
+  const isAdmin = ctx.roles.includes('admin') || isSuperAdmin;
+
   return {
     activeSession,
+    openSessions,
+    scheduledSessions,
+    allSessions: sessions,
     allMembers: members,
     attendanceCount: count,
+    isSuperAdmin,
+    isAdmin,
     isLiveSupabase: true,
   };
 }
@@ -1141,18 +1176,42 @@ export async function getLeaderReportsDataAction(selectedSectionId?: string, ses
   };
 }
 
-export async function getLeaderScannerDataAction(selectedSectionId?: string) {
+export async function getLeaderScannerDataAction(selectedSectionId?: string, targetSessionId?: string) {
   const ctx = await requireSession(STAFF_ROLES);
 
   if (ctx.mode === 'demo') {
-    return getAdminScannerDataAction();
+    const demoData = await getAdminScannerDataAction();
+    const demoSessions = ScoutStore.getFridaySessions();
+    const openSessions = demoSessions.filter((s) => s.is_open_for_attendance);
+    const activeSession = targetSessionId
+      ? demoSessions.find((s) => s.id === targetSessionId) || openSessions[0] || demoSessions[0] || null
+      : openSessions[0] || demoSessions.find((s) => s.status === 'open') || demoSessions[0] || null;
+    return {
+      ...demoData,
+      activeSession,
+      openSessions,
+      allSessions: demoSessions,
+      isSuperAdmin: true,
+      isAdmin: true,
+    };
   }
 
   const sessions = await listSessions(ctx.client!, selectedSectionId);
-  const activeSession = sessions.find((s) => s.is_open_for_attendance) || sessions[0] || null;
+  const openSessions = sessions.filter((s) => s.is_open_for_attendance);
+  const scheduledSessions = sessions.filter((s) => s.status === 'scheduled');
+
+  let activeSession: FridaySession | null = null;
+  if (targetSessionId) {
+    activeSession = sessions.find((s) => s.id === targetSessionId) || null;
+  } else if (openSessions.length > 0) {
+    activeSession = openSessions[0];
+  }
+
   let members = await listMembers(ctx.client!);
   if (selectedSectionId) {
     members = members.filter((m) => m.section_id === selectedSectionId);
+  } else if (activeSession?.section_id) {
+    members = members.filter((m) => m.section_id === activeSession.section_id);
   }
 
   let count = 0;
@@ -1161,10 +1220,18 @@ export async function getLeaderScannerDataAction(selectedSectionId?: string) {
     count = records.length;
   }
 
+  const isSuperAdmin = ctx.roles.includes('super_admin');
+  const isAdmin = ctx.roles.includes('admin') || isSuperAdmin;
+
   return {
     activeSession,
+    openSessions,
+    scheduledSessions,
+    allSessions: sessions,
     allMembers: members,
     attendanceCount: count,
+    isSuperAdmin,
+    isAdmin,
     isLiveSupabase: true,
   };
 }
@@ -1204,5 +1271,223 @@ export async function getSuperAdminOverviewAction() {
     totalSessions: sessions.length,
     recentAuditLogs: auditLogs ?? [],
   };
+}
+
+// ============================================================================
+// FRIDAY MEETINGS MANAGEMENT ACTIONS
+// ============================================================================
+
+export async function createFridayMeetingAction(input: {
+  title: string;
+  session_date: string;
+  section_id?: string | null;
+  year_id?: string | null;
+  start_time?: string;
+  late_threshold_time?: string;
+  is_open_for_attendance?: boolean;
+  notes?: string | null;
+}) {
+  const ctx = await requireSession(STAFF_ROLES);
+
+  if (!input.title || input.title.trim().length < 3) {
+    throw new AppError('VALIDATION', 'عنوان الاجتماع مطلوب ويجب ألا يقل عن 3 أحرف.');
+  }
+  if (!input.session_date) {
+    throw new AppError('VALIDATION', 'تاريخ الاجتماع مطلوب.');
+  }
+
+  if (ctx.mode === 'demo') {
+    const sess = ScoutStore.createFridaySession({
+      title: input.title,
+      session_date: input.session_date,
+      section_id: input.section_id || null,
+      year_id: input.year_id || null,
+      start_time: input.start_time || '08:30:00',
+      late_threshold_time: input.late_threshold_time || '08:45:00',
+      is_open_for_attendance: Boolean(input.is_open_for_attendance),
+      notes: input.notes || null,
+      created_by: ctx.userId,
+    });
+    safeRevalidate('/super-admin/attendance');
+    safeRevalidate('/leader/scanner');
+    return { success: true, session: sess };
+  }
+
+  const sess = await createFridaySession(ctx.client!, {
+    ...input,
+    created_by: ctx.userId,
+  });
+
+  safeRevalidate('/super-admin/attendance');
+  safeRevalidate('/leader/scanner');
+  return { success: true, session: sess };
+}
+
+export async function updateFridayMeetingAction(
+  sessionId: string,
+  input: {
+    title?: string;
+    session_date?: string;
+    section_id?: string | null;
+    year_id?: string | null;
+    start_time?: string;
+    late_threshold_time?: string;
+    notes?: string | null;
+  }
+) {
+  const ctx = await requireSession(STAFF_ROLES);
+
+  if (ctx.mode === 'demo') {
+    const updated = ScoutStore.updateFridaySession(sessionId, input);
+    safeRevalidate('/super-admin/attendance');
+    safeRevalidate('/leader/scanner');
+    return { success: true, session: updated };
+  }
+
+  const updated = await updateFridaySession(ctx.client!, sessionId, input);
+  safeRevalidate('/super-admin/attendance');
+  safeRevalidate('/leader/scanner');
+  return { success: true, session: updated };
+}
+
+export async function toggleMeetingAttendanceAction(sessionId: string, isOpen: boolean) {
+  const ctx = await requireSession(STAFF_ROLES);
+
+  if (ctx.mode === 'demo') {
+    ScoutStore.toggleSessionAttendanceOpen(sessionId, isOpen);
+    safeRevalidate('/super-admin/attendance');
+    safeRevalidate('/leader/scanner');
+    return { success: true, isOpen };
+  }
+
+  const sess = await toggleSessionAttendance(ctx.client!, sessionId, isOpen);
+  safeRevalidate('/super-admin/attendance');
+  safeRevalidate('/leader/scanner');
+  return { success: true, session: sess };
+}
+
+export async function deleteFridayMeetingAction(sessionId: string) {
+  const ctx = await requireSession(ADMIN_ROLES);
+
+  if (ctx.mode === 'demo') {
+    ScoutStore.deleteFridaySession(sessionId);
+    safeRevalidate('/super-admin/attendance');
+    safeRevalidate('/leader/scanner');
+    return { success: true };
+  }
+
+  await deleteFridaySession(ctx.client!, sessionId);
+  safeRevalidate('/super-admin/attendance');
+  safeRevalidate('/leader/scanner');
+  return { success: true };
+}
+
+export async function deleteAttendanceRecordAction(recordId: string, reason?: string) {
+  const ctx = await requireSession(STAFF_ROLES);
+
+  if (ctx.mode === 'demo') {
+    ScoutStore.deleteAttendanceRecord(recordId);
+    safeRevalidate('/super-admin/attendance');
+    safeRevalidate('/leader/scanner');
+    return { success: true, recordId };
+  }
+
+  const res = await deleteAttendanceRecord(ctx.client!, recordId, reason);
+  if (!res.success) {
+    throw new AppError('INTERNAL', res.error || 'تعذر إلغاء تسجيل الحضور.');
+  }
+
+  safeRevalidate('/super-admin/attendance');
+  safeRevalidate('/leader/scanner');
+  return { success: true, recordId: res.recordId };
+}
+
+export async function updateAttendanceUniformAction(recordId: string, uniformStatus: UniformStatus) {
+  const ctx = await requireSession(STAFF_ROLES);
+
+  if (ctx.mode === 'demo') {
+    ScoutStore.updateAttendanceUniform(recordId, uniformStatus);
+    safeRevalidate('/super-admin/attendance');
+    return { success: true };
+  }
+
+  await updateAttendanceUniform(ctx.client!, recordId, uniformStatus);
+  safeRevalidate('/super-admin/attendance');
+  return { success: true };
+}
+
+export async function getFridayMeetingsAdminAction(sectionId?: string) {
+  const ctx = await requireSession(STAFF_ROLES);
+
+  if (ctx.mode === 'demo') {
+    return {
+      sessions: ScoutStore.getFridaySessions(),
+      isLiveSupabase: false,
+    };
+  }
+
+  const sessions = await listSessions(ctx.client!, sectionId);
+  return {
+    sessions,
+    isLiveSupabase: true,
+  };
+}
+
+// ============================================================================
+// MEMBER LIFECYCLE ACTIONS
+// ============================================================================
+
+export async function toggleMemberActiveAction(memberId: string, isActive: boolean) {
+  const ctx = await requireSession(ADMIN_ROLES);
+
+  if (memberId === ctx.userId && !isActive) {
+    throw new AppError('FORBIDDEN', 'لا يمكنك تعطيل حسابك الشخصي المسجل به حالياً.');
+  }
+
+  if (ctx.mode === 'demo') {
+    ScoutStore.toggleMemberActive(memberId, isActive);
+    safeRevalidate('/super-admin/members');
+    return { success: true, isActive };
+  }
+
+  const res = await toggleMemberActive(ctx.client!, memberId, isActive);
+  if (!res.success) {
+    const errorMap: Record<string, string> = {
+      CANNOT_DEACTIVATE_SELF: 'لا يمكنك تعطيل حسابك الشخصي المسجل به حالياً.',
+      MEMBER_NOT_FOUND: 'العضو المطلوب غير موجود في النظام.',
+      CANNOT_DEACTIVATE_SUPER_ADMIN: 'غير مصرح بتعطيل حساب قائد عام / مسؤول النظام.',
+    };
+    throw new AppError('FORBIDDEN', errorMap[res.error || ''] || 'تعذر تغيير حالة العضو.');
+  }
+
+  safeRevalidate('/super-admin/members');
+  return { success: true, isActive: res.isActive };
+}
+
+export async function deleteMemberPermanentAction(memberId: string) {
+  const ctx = await requireSession(SUPER_ADMIN_ROLES);
+
+  if (memberId === ctx.userId) {
+    throw new AppError('FORBIDDEN', 'لا يمكن حذف حسابك الشخصي النشط.');
+  }
+
+  if (ctx.mode === 'demo') {
+    ScoutStore.deleteMemberPermanent(memberId);
+    safeRevalidate('/super-admin/members');
+    return { success: true, deletedMemberId: memberId };
+  }
+
+  const res = await deleteMemberPermanent(ctx.client!, memberId);
+  if (!res.success) {
+    const errorMap: Record<string, string> = {
+      CANNOT_DELETE_SELF: 'لا يمكن حذف حسابك الشخصي النشط.',
+      MEMBER_NOT_FOUND: 'العضو المطلوب غير موجود في النظام.',
+      CANNOT_DELETE_SUPER_ADMIN: 'غير مصرح بحذف حساب قائد عام / مسؤول النظام مباشرة.',
+    };
+    throw new AppError('INTERNAL', errorMap[res.error || ''] || 'تعذر حذف الكشاف نهائياً.');
+  }
+
+  safeRevalidate('/super-admin/members');
+  return { success: true, deletedMemberId: res.deletedMemberId };
 }
 
