@@ -148,4 +148,56 @@ describe('Team Distribution Engine & Child-Friendly Identity Tests', () => {
       process.env.SCOUT_DEMO_MODE = prevDemo;
     }
   });
+
+  it('8. Safe Login Contract: Empty or invalid input returns structured error without throwing 500', async () => {
+    const { loginScoutMemberAction } = await import('@/app/actions/scout-actions');
+
+    const emptyRes = await loginScoutMemberAction({ identifier: '', password: '' });
+    assert.strictEqual(emptyRes.success, false);
+    assert.ok(emptyRes.error?.includes('يرجى إدخال'));
+
+    const noPassRes = await loginScoutMemberAction({ identifier: 'SCT-2026-0001', password: '' });
+    assert.strictEqual(noPassRes.success, false);
+    assert.ok(noPassRes.error?.includes('كلمة المرور'));
+  });
+
+  it('9. Safe Login Contract: Non-existent scout number or phone returns structured error (never throws)', async () => {
+    const prevDemo = process.env.SCOUT_DEMO_MODE;
+    process.env.SCOUT_DEMO_MODE = 'true';
+    try {
+      const { loginScoutMemberAction } = await import('@/app/actions/scout-actions');
+
+      const notFoundRes = await loginScoutMemberAction({
+        identifier: 'SCT-NON-EXISTENT',
+        password: 'password123',
+      });
+      assert.strictEqual(notFoundRes.success, false);
+      assert.ok(notFoundRes.error?.includes('لم يتم العثور'));
+    } finally {
+      process.env.SCOUT_DEMO_MODE = prevDemo;
+    }
+  });
+
+  it('10. Safe Login Contract: Demo member login by member number or phone resolves redirectUrl cleanly', async () => {
+    const prevDemo = process.env.SCOUT_DEMO_MODE;
+    process.env.SCOUT_DEMO_MODE = 'true';
+    try {
+      const { loginScoutMemberAction } = await import('@/app/actions/scout-actions');
+      const { ScoutStore } = await import('@/lib/data/scout-store');
+
+      const all = ScoutStore.getAllMembers();
+      if (all.length > 0) {
+        const testMember = all[0];
+        const resByNumber = await loginScoutMemberAction({
+          identifier: testMember.member_number,
+          password: 'any-password',
+        });
+        assert.strictEqual(resByNumber.success, true);
+        assert.ok(resByNumber.redirectUrl);
+        assert.strictEqual(resByNumber.userId, testMember.id);
+      }
+    } finally {
+      process.env.SCOUT_DEMO_MODE = prevDemo;
+    }
+  });
 });

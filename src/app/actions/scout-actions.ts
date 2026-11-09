@@ -1715,88 +1715,148 @@ export async function deleteMemberPermanentAction(memberId: string, confirmation
  *  - Phone number + Password (E.164 / Egyptian +20)
  *  - Standard Email + Password (for staff)
  */
+export type LoginActionResult = {
+  success: boolean;
+  error?: string;
+  redirectUrl?: string;
+  userId?: string;
+  roles?: string[];
+};
+
+/**
+ * Server Action: Scout and Leader login supporting:
+ *  - Scout number + Password (e.g. SCT-2026-0001, ADMIN-001)
+ *  - Phone number + Password (E.164 / Egyptian +20)
+ *  - Standard Email + Password (for staff & leaders)
+ *
+ * Safe contract: Never throws uncaught errors to prevent Next.js 16 / React 19
+ * Minified React error #441 (HTTP 500 server crash). Returns a discriminated result.
+ */
 export async function loginScoutMemberAction(params: {
   identifier: string;
   password: string;
-}) {
-  const trimmed = params.identifier?.trim();
-  if (!trimmed) {
-    throw new AppError('VALIDATION', 'يرجى إدخال رقم الكشاف أو البريد أو رقم الهاتف.');
-  }
-  if (!params.password) {
-    throw new AppError('VALIDATION', 'يرجى إدخال كلمة المرور.');
-  }
+}): Promise<LoginActionResult> {
+  try {
+    const trimmed = params.identifier?.trim();
+    if (!trimmed) {
+      return { success: false, error: 'يرجى إدخال رقم الكشاف أو البريد أو رقم الهاتف.' };
+    }
+    if (!params.password) {
+      return { success: false, error: 'يرجى إدخال كلمة المرور.' };
+    }
 
-  const client = await createServerSupabaseClient();
-  const adminClient = createAdminClient();
+    const mode = getBackendMode();
+    if (mode === 'demo') {
+      const allMembers = ScoutStore.getAllMembers();
+      const normalizedInput = normalizePhoneNumber(trimmed);
+      const found = allMembers.find(
+        (m) =>
+          m.member_number.toLowerCase() === trimmed.toLowerCase() ||
+          (m.phone && normalizePhoneNumber(m.phone) === normalizedInput)
+      );
+      if (!found) {
+        return {
+          success: false,
+          error: 'لم يتم العثور على حساب مرتبط برقم الكشاف أو الهاتف المدخل. يرجى التأكد من البيانات أو التسجيل.',
+        };
+      }
+      const roles = (found.roles && found.roles.length > 0 ? found.roles : ['member']) as UserRoleType[];
+      return {
+        success: true,
+        redirectUrl: getDefaultRedirectForRole(roles),
+        userId: found.id,
+        roles,
+      };
+    }
 
-  let targetEmail = trimmed;
+    const client = await createServerSupabaseClient();
+    const adminClient = createAdminClient();
 
-  // Check if identifier is not an email
-  if (!trimmed.includes('@')) {
-    // 1. Try finding by member_number (e.g. SCT-2026-0001, LDR-2026-..., ADMIN-...)
-    const { data: memberByNumber } = await adminClient
-      .from('profiles')
-      .select('id, member_number')
-      .ilike('member_number', trimmed)
-      .maybeSingle();
+    let targetEmail = trimmed;
 
-    let targetUserId = memberByNumber?.id;
-
-    // 2. If not found by member_number, try finding by phone number
-    if (!targetUserId) {
-      const normalizedPhone = normalizePhoneNumber(trimmed);
-      const { data: memberByPhone } = await adminClient
+    // Check if identifier is not an email (Scout number or phone number login)
+    if (!trimmed.includes('@')) {
+      // 1. Try finding by member_number (e.g. SCT-2026-0001, LDR-2026-..., ADMIN-...)
+      const { data: memberByNumber } = await adminClient
         .from('profiles')
-        .select('id, phone')
-        .or(`phone.eq.${trimmed},phone.eq.${normalizedPhone}`)
+        .select('id, member_number')
+        .ilike('member_number', trimmed)
         .maybeSingle();
 
-      targetUserId = memberByPhone?.id;
+      let targetUserId = memberByNumber?.id;
+
+      // 2. If not found by member_number, try finding by phone number safely
+      if (!targetUserId) {
+        const digits = trimmed.replace(/\D/g, '');
+        const normalizedPhone = normalizePhoneNumber(trimmed);
+        const phoneCandidates = [...new Set([trimmed, digits, normalizedPhone].filter((p) => p && p.length >= 8))];
+
+        if (phoneCandidates.length > 0) {
+          const { data: memberByPhone } = await adminClient
+            .from('profiles')
+            .select('id, phone')
+            .in('phone', phoneCandidates)
+            .maybeSingle();
+
+          targetUserId = memberByPhone?.id;
+        }
+      }
+
+      if (!targetUserId) {
+        return {
+          success: false,
+          error: 'لم يتم العثور على حساب مرتبط برقم الكشاف أو الهاتف المدخل. يرجى التأكد من البيانات أو التسجيل.',
+        };
+      }
+
+      // Retrieve auth email for target user
+      const { data: authUserData, error: authUserErr } = await adminClient.auth.admin.getUserById(targetUserId);
+      if (authUserErr || !authUserData?.user?.email) {
+        return {
+          success: false,
+          error: 'تعذر استرداد بيانات الحساب الأمني المرتبط بالكشاف. يرجى مراجعة إدارة الفوج.',
+        };
+      }
+      targetEmail = authUserData.user.email;
     }
 
-    if (!targetUserId) {
-      throw new AppError(
-        'NOT_FOUND',
-        'لم يتم العثور على حساب مرتبط برقم الكشاف أو الهاتف المدخل. يرجى التأكد من البيانات أو التسجيل.'
-      );
+    // Attempt authentication with resolved email & password
+    const { data: authData, error: authErr } = await client.auth.signInWithPassword({
+      email: targetEmail,
+      password: params.password,
+    });
+
+    if (authErr || !authData?.user) {
+      const msg = authErr?.message?.toLowerCase() || '';
+      if (msg.includes('invalid') || msg.includes('credentials')) {
+        return { success: false, error: 'بيانات الدخول أو كلمة المرور غير صحيحة.' };
+      }
+      if (msg.includes('rate') || msg.includes('too many')) {
+        return { success: false, error: 'تم تجاوز عدد محاولات الدخول. يرجى الانتظار قليلاً.' };
+      }
+      if (msg.includes('email not confirmed')) {
+        return { success: false, error: 'يرجى مراجعة بريدك الإلكتروني لتأكيد الحساب أولاً.' };
+      }
+      return { success: false, error: 'تعذر تسجيل الدخول، يرجى التأكد من صحة كلمة المرور.' };
     }
 
-    // Retrieve auth email for target user
-    const { data: authUserData, error: authUserErr } = await adminClient.auth.admin.getUserById(targetUserId);
-    if (authUserErr || !authUserData?.user?.email) {
-      throw new AppError('INTERNAL', 'تعذر استرداد بيانات الحساب الأمني المرتبط بالكشاف.');
-    }
-    targetEmail = authUserData.user.email;
+    // Determine redirect URL using adminClient for reliable, RLS-immune role retrieval
+    const roles = await getUserRoles(adminClient, authData.user.id);
+    const redirectUrl = getDefaultRedirectForRole(roles);
+
+    return {
+      success: true,
+      redirectUrl,
+      userId: authData.user.id,
+      roles,
+    };
+  } catch (err: unknown) {
+    console.error('[loginScoutMemberAction] Unexpected failure:', err);
+    return {
+      success: false,
+      error: 'تعذر تسجيل الدخول بسبب خطأ في الخادم. يرجى المحاولة مرة أخرى.',
+    };
   }
-
-  // Attempt authentication with resolved email & password
-  const { data: authData, error: authErr } = await client.auth.signInWithPassword({
-    email: targetEmail,
-    password: params.password,
-  });
-
-  if (authErr || !authData?.user) {
-    const msg = authErr?.message?.toLowerCase() || '';
-    if (msg.includes('invalid') || msg.includes('credentials')) {
-      throw new AppError('UNAUTHENTICATED', 'بيانات الدخول أو كلمة المرور غير صحيحة.');
-    }
-    if (msg.includes('rate') || msg.includes('too many')) {
-      throw new AppError('UNAUTHENTICATED', 'تم تجاوز عدد محاولات الدخول. يرجى الانتظار قليلاً.');
-    }
-    throw new AppError('UNAUTHENTICATED', 'تعذر تسجيل الدخول، يرجى التأكد من صحة كلمة المرور.');
-  }
-
-  // Determine redirect URL
-  const roles = await getUserRoles(client, authData.user.id);
-  const redirectUrl = getDefaultRedirectForRole(roles);
-
-  return {
-    success: true,
-    redirectUrl,
-    userId: authData.user.id,
-    roles,
-  };
 }
 
 /**

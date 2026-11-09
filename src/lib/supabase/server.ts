@@ -15,14 +15,21 @@ export async function createServerSupabaseClient() {
     throw new AppError('CONFIG_MISSING', CONFIG_MISSING_MESSAGE);
   }
 
-  const cookieStore = await cookies();
+  let cookieStore: any = null;
+  try {
+    cookieStore = await cookies();
+  } catch {
+    // When invoked outside an active request context (e.g. test runner or isolated script)
+    cookieStore = null;
+  }
 
   return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
       getAll() {
-        return cookieStore.getAll();
+        return cookieStore ? cookieStore.getAll() : [];
       },
       setAll(cookiesToSet) {
+        if (!cookieStore) return;
         try {
           cookiesToSet.forEach(({ name, value, options }) => cookieStore.set(name, value, options));
         } catch {

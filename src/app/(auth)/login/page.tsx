@@ -62,11 +62,24 @@ function LoginFormContent() {
         password,
       });
 
+      if (!res.success) {
+        setError(res.error || 'تعذر تسجيل الدخول. يرجى التحقق من بياناتك والمحاولة مرة أخرى.');
+        setIsLoading(false);
+        return;
+      }
+
       const destination = redirectPath !== '/dashboard' ? redirectPath : res.redirectUrl || '/dashboard';
-      router.push(destination);
-      router.refresh();
+      if (typeof window !== 'undefined') {
+        window.location.href = destination;
+      } else {
+        router.push(destination);
+        router.refresh();
+      }
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'تعذر تسجيل الدخول. يرجى التحقق من بياناتك والمحاولة مرة أخرى.';
+      const rawMsg = err instanceof Error ? err.message : '';
+      const msg = (rawMsg.includes('441') || rawMsg.includes('digest') || rawMsg.includes('Server Components'))
+        ? 'تعذر تسجيل الدخول بسبب خطأ في اتصال الخادم. يرجى تحديث الصفحة والمحاولة مرة أخرى.'
+        : (rawMsg || 'تعذر تسجيل الدخول. يرجى التحقق من بياناتك والمحاولة مرة أخرى.');
       setError(msg);
       setIsLoading(false);
     }
