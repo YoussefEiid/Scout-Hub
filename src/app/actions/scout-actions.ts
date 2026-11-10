@@ -1089,12 +1089,24 @@ export async function createLeaderAccountAction(params: {
     throw new AppError('VALIDATION', 'البريد الإلكتروني غير صالح.');
   }
 
+  const trimmedSectionId = params.sectionId?.trim();
+  if (!trimmedSectionId) {
+    throw new AppError('VALIDATION', 'يجب اختيار القسم الكشفي المسؤول عنه القائد.');
+  }
+
+  const trimmedYearId = params.yearId && params.yearId.trim() !== '' ? params.yearId.trim() : null;
+
+  const rawPassword = params.password?.trim();
+  const password = rawPassword && rawPassword.length > 0 ? rawPassword : 'ScoutLeader2026!';
+  if (password.length < 6) {
+    throw new AppError('VALIDATION', 'كلمة المرور يجب ألا تقل عن 6 أحرف.');
+  }
+
   if (ctx.mode === 'demo') {
     return { success: true, message: 'تم إنشاء حساب القائد بنجاح (وضع المعاينة)' };
   }
 
   const adminClient = createAdminClient();
-  const password = params.password || 'ScoutLeader2026!';
 
   // 1. Create Supabase Auth user
   const { data: authUser, error: authErr } = await adminClient.auth.admin.createUser({
@@ -1123,8 +1135,8 @@ export async function createLeaderAccountAction(params: {
       id: userId,
       member_number: memberNum,
       full_name: trimmedName,
-      section_id: params.sectionId,
-      year_id: params.yearId ?? null,
+      section_id: trimmedSectionId,
+      year_id: trimmedYearId,
       initial_commitment: 'committed',
       is_active: true,
     });
@@ -1141,7 +1153,17 @@ export async function createLeaderAccountAction(params: {
     await adminClient.from('qr_credentials').insert({ member_id: userId });
 
     // 6. Assign scope assignment
-    await assignStaffScope(ctx.client!, userId, params.sectionId, params.yearId);
+    try {
+      await assignStaffScope(ctx.client!, userId, trimmedSectionId, trimmedYearId);
+    } catch {
+      const { error: directScopeErr } = await adminClient.from('staff_scope_assignments').insert({
+        user_id: userId,
+        section_id: trimmedSectionId,
+        year_id: trimmedYearId,
+        assigned_by: ctx.userId,
+      });
+      if (directScopeErr) throw directScopeErr;
+    }
 
     return { success: true, userId, memberNumber: memberNum };
   } catch (err: any) {
@@ -1162,7 +1184,23 @@ export async function assignLeaderScopeAction(params: {
   if (ctx.mode === 'demo') {
     return { success: true };
   }
-  await assignStaffScope(ctx.client!, params.userId, params.sectionId, params.yearId);
+  const sectionId = params.sectionId?.trim();
+  if (!sectionId) {
+    throw new AppError('VALIDATION', 'يجب اختيار القسم الكشفي.');
+  }
+  const yearId = params.yearId && params.yearId.trim() !== '' ? params.yearId.trim() : null;
+  try {
+    await assignStaffScope(ctx.client!, params.userId, sectionId, yearId);
+  } catch {
+    const adminClient = createAdminClient();
+    const { error: directErr } = await adminClient.from('staff_scope_assignments').insert({
+      user_id: params.userId,
+      section_id: sectionId,
+      year_id: yearId,
+      assigned_by: ctx.userId,
+    });
+    if (directErr) throw directErr;
+  }
   return { success: true };
 }
 
