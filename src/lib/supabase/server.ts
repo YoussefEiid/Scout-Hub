@@ -1,7 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { cookies } from 'next/headers';
 import { AppError } from '@/lib/actions/result';
-import { CONFIG_MISSING_MESSAGE, isSupabaseConfigured } from '@/lib/config/runtime';
+import { CONFIG_MISSING_MESSAGE, isSupabaseConfigured, getCanonicalSupabaseUrl } from '@/lib/config/runtime';
 
 /**
  * Per-request Supabase client bound to the caller's session cookies and the ANON key.
@@ -23,7 +23,8 @@ export async function createServerSupabaseClient() {
     cookieStore = null;
   }
 
-  return createServerClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+  const supabaseUrl = getCanonicalSupabaseUrl();
+  return createServerClient(supabaseUrl, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
     cookies: {
       getAll() {
         return cookieStore ? cookieStore.getAll() : [];

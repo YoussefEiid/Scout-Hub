@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import { AppError } from '@/lib/actions/result';
-import { isServiceRoleConfigured } from '@/lib/config/runtime';
+import { isServiceRoleConfigured, getCanonicalSupabaseUrl } from '@/lib/config/runtime';
 
 /**
  * PRIVILEGED client (service-role key, bypasses RLS). SERVER ONLY.
@@ -18,7 +18,8 @@ export function createAdminClient() {
     throw new AppError('CONFIG_MISSING', 'مفتاح الخدمة (SUPABASE_SERVICE_ROLE_KEY) غير مضبوط على الخادم.');
   }
 
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+  const supabaseUrl = getCanonicalSupabaseUrl();
+  return createClient(supabaseUrl, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 }

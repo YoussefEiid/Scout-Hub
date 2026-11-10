@@ -1866,7 +1866,11 @@ export async function loginScoutMemberAction(params: {
 
     if (authErr || !authData?.user) {
       const msg = authErr?.message?.toLowerCase() || '';
-      if (msg.includes('invalid') || msg.includes('credentials')) {
+      if (msg.includes('invalid path')) {
+        console.error('[loginScoutMemberAction] Supabase URL path error:', authErr?.message);
+        return { success: false, error: 'تعذر الاتصال بخدمة المصادقة بسبب عدم صحة مسار رابط الخادم. يرجى مراجعة إعدادات الرابط.' };
+      }
+      if (msg.includes('invalid login credentials') || msg.includes('invalid grant') || msg.includes('credentials')) {
         return { success: false, error: 'بيانات الدخول أو كلمة المرور غير صحيحة.' };
       }
       if (msg.includes('rate') || msg.includes('too many')) {

@@ -31,6 +31,15 @@ export function isSupabaseConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 }
 
+/**
+ * Resolves the canonical Supabase URL by trimming whitespace, trailing slashes,
+ * and any trailing /rest/v1 endpoint path (which is often mistakenly copied from the Supabase dashboard).
+ */
+export function getCanonicalSupabaseUrl(url?: string): string {
+  const raw = url || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  return raw.trim().replace(/\/rest\/v1\/?$/, '').replace(/\/+$/, '');
+}
+
 export function isServiceRoleConfigured(): boolean {
   return Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
